@@ -50,6 +50,7 @@ Optional members:
 | Member                    | Purpose                                                                         |
 | ------------------------- | ------------------------------------------------------------------------------- |
 | `resolveAssetPath(file)`  | Map a requested asset name to an absolute path, or `null` to refuse it. Enables `GET /api/benchmark-assets/<benchmarkId>/<file>`. Validate the name yourself — the host only checks the file extension against its supported image types. |
+| `defaultSystemPrompt`     | The prompt a run uses when the request omits `systemPrompt`. Serve it from the dataset when the dataset owns the prompt, so the prompt has exactly one copy; `GET /api/benchmarks` publishes it and the run form prefers it over the client option. |
 
 ## Frontend entry point — `pack.client.ts`
 
@@ -70,6 +71,11 @@ supply everything the UI needs: labels, the default system prompt and prompt
 template, whether scoring is binary or graded, whether the benchmark attaches
 images, and `taskIdIndexPattern` — the regular expression whose first capture
 group turns a task id into its dataset index for task grouping.
+
+`systemPrompt` is optional here. Omit it when the server derives the prompt
+from the dataset: the form fills itself from `GET /api/benchmarks`, which
+keeps a re-exported dataset from silently disagreeing with a copy checked
+into the pack.
 
 ## Tests
 

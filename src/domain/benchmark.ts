@@ -43,7 +43,8 @@ export type BenchmarkOption = {
    */
   taskIdIndexPattern?: RegExp;
   datasetSize: number;
-  systemPrompt: string;
+  /** Omitted when the benchmark's prompt ships with its dataset and the server serves it. */
+  systemPrompt?: string;
   promptTemplate: string;
   taskNumbersPlaceholder: string;
   promptTemplateHint: string;
@@ -202,8 +203,8 @@ export type BenchResult = {
   test: string;
   rawOutput: string;
   thinkingOutput?: string;
+  /** Legacy interleaved thinking+output text; only present on older saved runs. */
   rawTranscript?: string;
-  rawSse?: string;
   extractedCode: string;
   error?: string | null;
   traceback?: string | null;

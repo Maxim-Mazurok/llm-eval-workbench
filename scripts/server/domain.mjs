@@ -29,7 +29,6 @@ export function compactResult(result) {
     rawOutput,
     thinkingOutput,
     rawTranscript,
-    rawSse,
     extractedCode,
     harnessStdout,
     harnessStderr,

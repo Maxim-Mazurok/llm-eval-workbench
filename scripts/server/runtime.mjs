@@ -123,13 +123,22 @@ export function createRuntimeServer({
     return run.dir;
   }
 
+  // Write via a temp file plus rename so a process death mid-write leaves the
+  // previous complete artifact in place instead of truncated JSON that would
+  // fail to parse on reload and take resume down with it.
+  async function writeFileAtomic(filePath, contents) {
+    const temporaryPath = `${filePath}.tmp`;
+    await fs.writeFile(temporaryPath, contents);
+    await fs.rename(temporaryPath, filePath);
+  }
+
   async function writeRunArtifacts(run) {
     if (run.deleted) return;
     ensureRunDir(run);
     await fs.mkdir(run.dir, { recursive: true });
     await Promise.all([
-      fs.writeFile(join(run.dir, "run.json"), JSON.stringify(persistedRunState(run), null, 2)),
-      fs.writeFile(join(run.dir, "results.json"), JSON.stringify(run.results, null, 2))
+      writeFileAtomic(join(run.dir, "run.json"), JSON.stringify(persistedRunState(run), null, 2)),
+      writeFileAtomic(join(run.dir, "results.json"), JSON.stringify(run.results, null, 2))
     ]);
   }
 
@@ -258,8 +267,6 @@ export function createRuntimeServer({
     let buffer = "";
     let output = "";
     let thinking = "";
-    let transcript = "";
-    let raw = "";
     let usage = null;
     let finishReason = null;
     let loopDetection = null;
@@ -269,8 +276,6 @@ export function createRuntimeServer({
       return {
         output,
         thinking,
-        transcript,
-        raw,
         usage,
         finishReason: loopDetection && run.adaptiveRepetitionPenalty ? "loop" : finishReason,
         loopDetection,
@@ -310,7 +315,6 @@ export function createRuntimeServer({
           if (!line.startsWith("data:")) continue;
           const payload = line.slice(5).trim();
           if (!payload || payload === "[DONE]") continue;
-          raw += `${payload}\n`;
           let parsed;
           try {
             parsed = JSON.parse(payload);
@@ -324,7 +328,6 @@ export function createRuntimeServer({
           const delta = choice?.delta ?? {};
           const parts = extractTextFromDelta(delta);
           for (const part of parts) {
-            transcript += part.text;
             if (part.channel === "output") output += part.text;
             if (part.channel === "thinking") thinking += part.text;
             appendEvent(run, "token", { taskId: problem.task_id, index, ...context, ...part });
@@ -550,8 +553,6 @@ export function createRuntimeServer({
               test: benchmark.problemReference(problem),
               rawOutput: "",
               thinkingOutput: "",
-              rawTranscript: "",
-              rawSse: "",
               extractedCode: "",
               usage: null,
               finishReason: null,
@@ -605,8 +606,6 @@ export function createRuntimeServer({
               test: benchmark.problemReference(problem),
               rawOutput: generation.output,
               thinkingOutput: generation.thinking,
-              rawTranscript: generation.transcript,
-              rawSse: generation.raw,
               extractedCode: "",
               usage: generation.usage,
               finishReason: generation.finishReason,
@@ -656,8 +655,6 @@ export function createRuntimeServer({
             test: benchmark.problemReference(problem),
             rawOutput: generation.output,
             thinkingOutput: generation.thinking,
-            rawTranscript: generation.transcript,
-            rawSse: generation.raw,
             extractedCode,
             ...(generation.loopDetection ? { loopDetection: generation.loopDetection } : {}),
             usage: generation.usage,

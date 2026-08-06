@@ -169,6 +169,41 @@ describe("App bbeh benchmark", () => {
     });
   });
 
+  it("takes a pack benchmark's system prompt from the server registry", async () => {
+    const datasetSystemPrompt = "prompt exported with the example pack dataset";
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/benchmarks")) {
+        return jsonResponse({
+          benchmarks: [{ id: "example-pack-benchmark", defaultSystemPrompt: datasetSystemPrompt }]
+        });
+      }
+      if (url.endsWith("/api/runs") && init?.method === "POST") {
+        return jsonResponse({ id: "pp-run-1", status: "queued", results: [] }, 201);
+      }
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({ runs: [] });
+      }
+      return jsonResponse({ runs: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const systemPromptField = screen.getByLabelText("System prompt") as HTMLTextAreaElement;
+    await userEvent.selectOptions(screen.getByLabelText("Benchmark"), "example-pack-benchmark");
+    await waitFor(() => expect(systemPromptField.value).toBe(datasetSystemPrompt));
+
+    await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "demo-model");
+    await userEvent.click(screen.getByRole("button", { name: /start run/i }));
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(postCall?.[1]?.body))).toMatchObject({
+      benchmark: "example-pack-benchmark",
+      systemPrompt: datasetSystemPrompt
+    });
+  });
+
   it("renders answer-oriented labels and subtasks for a bbeh run", async () => {
     const run = bbehRun();
     const fetchMock = vi.fn((input: RequestInfo | URL) => {

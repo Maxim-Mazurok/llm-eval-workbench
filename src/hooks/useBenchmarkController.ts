@@ -51,11 +51,13 @@ import {
 } from "../domain/performanceMetrics";
 import { useRunEvents } from "./useRunEvents";
 import { useBenchForm } from "./useBenchForm";
+import { useBenchmarkDefaults } from "./useBenchmarkDefaults";
 
 export function useBenchmarkController() {
   const initialRoute = useMemo(() => readBenchRoute(), []);
   const performanceMetricsEnabled = useMemo(() => performanceDebugIsEnabled(window), []);
-  const form = useBenchForm();
+  const systemPromptByBenchmark = useBenchmarkDefaults();
+  const form = useBenchForm(systemPromptByBenchmark);
   const {
     benchmark, baseUrl, apiKey, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, sampleLimit, startIndex, testNumbers,

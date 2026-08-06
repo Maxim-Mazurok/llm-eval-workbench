@@ -1159,6 +1159,9 @@ describe("App notifications", () => {
     let detailFetches = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/benchmarks")) {
+        return jsonResponse({ benchmarks: [] });
+      }
       if (url.endsWith("/api/runs")) {
         return jsonResponse({ runs: [runningRun] });
       }

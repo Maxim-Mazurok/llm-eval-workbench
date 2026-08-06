@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,11 +24,20 @@ export function benchmarkPacksDir() {
   return process.env.BENCHMARK_PACKS_DIR || packsRootDefault;
 }
 
+// statSync resolves symlinks, which readdir's Dirent.isDirectory() does not: a pack
+// cloned elsewhere and symlinked into packs/ must load exactly like one cloned in place.
+function isPackDirectory(packsDir, name) {
+  try {
+    return statSync(join(packsDir, name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function packDirectoryNames(packsDir) {
   try {
-    return readdirSync(packsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => entry.name)
+    return readdirSync(packsDir)
+      .filter((name) => !name.startsWith(".") && isPackDirectory(packsDir, name))
       .sort();
   } catch {
     return [];

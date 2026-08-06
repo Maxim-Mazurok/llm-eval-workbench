@@ -11,7 +11,13 @@ import {
   normalizePassCount
 } from "../domain/runs";
 
-export function useBenchForm() {
+/**
+ * `systemPromptByBenchmark` comes from the server registry. The field shows an
+ * edit when there is one and otherwise tracks that default, so a benchmark whose
+ * prompt ships with its dataset picks up a re-exported prompt without the UI
+ * carrying its own stale copy.
+ */
+export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {}) {
   const [benchmark, setBenchmarkState] = useState<BenchmarkId>(DEFAULT_FORM_VALUES.benchmark);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_FORM_VALUES.baseUrl);
   const [apiKey, setApiKey] = useState(DEFAULT_FORM_VALUES.apiKey);
@@ -28,16 +34,19 @@ export function useBenchForm() {
   const [sampleLimit, setSampleLimit] = useState(DEFAULT_FORM_VALUES.sampleLimit);
   const [startIndex, setStartIndex] = useState(DEFAULT_FORM_VALUES.startIndex);
   const [testNumbers, setTestNumbers] = useState(DEFAULT_FORM_VALUES.testNumbers);
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_FORM_VALUES.systemPrompt);
+  const [systemPromptEdit, setSystemPromptEdit] = useState<string | null>(null);
   const [promptTemplate, setPromptTemplate] = useState(DEFAULT_FORM_VALUES.promptTemplate);
   const [extraBody, setExtraBody] = useState(DEFAULT_FORM_VALUES.extraBody);
+
+  const systemPrompt =
+    systemPromptEdit ?? systemPromptByBenchmark[benchmark] ?? benchmarkOption(benchmark).systemPrompt ?? "";
 
   // Switching benchmarks swaps in that benchmark's default prompts and clears
   // dataset-specific task selections, which do not transfer between datasets.
   function setBenchmark(nextBenchmark: BenchmarkId) {
     const option = benchmarkOption(nextBenchmark);
     setBenchmarkState(option.id);
-    setSystemPrompt(option.systemPrompt);
+    setSystemPromptEdit(null);
     setPromptTemplate(option.promptTemplate);
     setTestNumbers(DEFAULT_FORM_VALUES.testNumbers);
     setStartIndex(DEFAULT_FORM_VALUES.startIndex);
@@ -61,7 +70,7 @@ export function useBenchForm() {
     setSampleLimit(DEFAULT_FORM_VALUES.sampleLimit);
     setStartIndex(DEFAULT_FORM_VALUES.startIndex);
     setTestNumbers(DEFAULT_FORM_VALUES.testNumbers);
-    setSystemPrompt(DEFAULT_FORM_VALUES.systemPrompt);
+    setSystemPromptEdit(null);
     setPromptTemplate(DEFAULT_FORM_VALUES.promptTemplate);
     setExtraBody(DEFAULT_FORM_VALUES.extraBody);
   }
@@ -83,7 +92,7 @@ export function useBenchForm() {
     setSampleLimit(Number(config.sampleLimit ?? 0));
     setStartIndex(Number(config.startIndex ?? 0));
     setTestNumbers(String(config.testNumbers ?? ""));
-    setSystemPrompt(String(config.systemPrompt ?? option.systemPrompt));
+    setSystemPromptEdit(config.systemPrompt === undefined ? null : String(config.systemPrompt));
     setPromptTemplate(String(config.promptTemplate ?? option.promptTemplate));
     setExtraBody(formatExtraBody(config.extraBody));
   }
@@ -99,6 +108,6 @@ export function useBenchForm() {
     },
     setRepetitionPenalty,
     setCommentSignalThreshold, setSampleLimit, setStartIndex, setTestNumbers,
-    setSystemPrompt, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
+    setSystemPrompt: setSystemPromptEdit, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
   };
 }

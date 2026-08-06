@@ -2,7 +2,6 @@
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compactResult, extractCodeFromOutput } from "./server/domain.mjs";
 import { getBenchmark } from "./server/benchmarks/registry.mjs";
 import { executeTests } from "./server/testHarness.mjs";
 import { discoverSavedRuns, storedResultStatus } from "./reprocess-saved-results.mjs";
@@ -152,7 +151,7 @@ async function persistMigratedRun(report, backupRoot, migrationAt) {
   const { savedRun } = report;
   const backupRunDir = join(backupRoot, savedRun.directoryName);
   await fs.mkdir(backupRunDir, { recursive: true });
-  const artifactNames = ["run.json", "results.json", "task-logs.jsonl", "events.jsonl"];
+  const artifactNames = ["run.json", "results.json", "task-logs.jsonl"];
   await Promise.all(artifactNames.map(async (name) => {
     const source = join(savedRun.directory, name);
     try {
@@ -167,8 +166,7 @@ async function persistMigratedRun(report, backupRoot, migrationAt) {
   await Promise.all([
     writeJsonAtomic(join(savedRun.directory, "results.json"), savedRun.results),
     writeJsonAtomic(join(savedRun.directory, "run.json"), runState),
-    rewriteJsonLines(join(savedRun.directory, "task-logs.jsonl"), (entry) => updateTaskLogEntry(entry, updatedByKey, migrationAt)),
-    rewriteEvents(join(savedRun.directory, "events.jsonl"), updatedByKey, runState)
+    rewriteJsonLines(join(savedRun.directory, "task-logs.jsonl"), (entry) => updateTaskLogEntry(entry, updatedByKey, migrationAt))
   ]);
 }
 
@@ -204,62 +202,6 @@ function updateTaskLogEntry(entry, updatedByKey) {
     updated.text = harnessText;
   }
   return updated;
-}
-
-function summaryFields(runState) {
-  const {
-    completed,
-    passed,
-    failed,
-    liveScore,
-    finalScore,
-    assertionsPassed,
-    assertionsTotal,
-    assertionScore
-  } = runState;
-  return { completed, passed, failed, liveScore, finalScore, assertionsPassed, assertionsTotal, assertionScore };
-}
-
-async function rewriteEvents(path, updatedByKey, runState) {
-  let passDelta = 0;
-  let assertionsPassedDelta = 0;
-  let assertionsTotalDelta = 0;
-  await rewriteJsonLines(path, (event) => {
-    if (!event || typeof event !== "object") return event;
-    const data = event.data && typeof event.data === "object" ? { ...event.data } : event.data;
-    if (!data) return event;
-    const result = updatedByKey.get(resultKey(data));
-    if (result && event.type === "code-extracted") data.code = result.extractedCode;
-    if (result && event.type === "task-finished") {
-      const oldResult = data.result || {};
-      const oldTests = oldResult.tests || [];
-      passDelta += Number(result.passed) - Number(Boolean(oldResult.passed));
-      assertionsPassedDelta += result.tests.filter((test) => test.passed).length - oldTests.filter((test) => test.passed).length;
-      assertionsTotalDelta += result.tests.length - oldTests.length;
-      data.result = compactResult(result);
-    }
-    if (data.summary && typeof data.summary === "object") {
-      if (event.type === "done") {
-        data.summary = { ...data.summary, ...summaryFields(runState) };
-      } else {
-        const completed = Number(data.summary.completed || 0);
-        const passed = Number(data.summary.passed || 0) + passDelta;
-        const assertionsPassed = Number(data.summary.assertionsPassed || 0) + assertionsPassedDelta;
-        const assertionsTotal = Number(data.summary.assertionsTotal || 0) + assertionsTotalDelta;
-        data.summary = {
-          ...data.summary,
-          passed,
-          failed: completed - passed,
-          liveScore: completed ? passed / completed : 0,
-          finalScore: data.summary.total ? passed / Number(data.summary.total) : null,
-          assertionsPassed,
-          assertionsTotal,
-          assertionScore: assertionsTotal ? assertionsPassed / assertionsTotal : 0
-        };
-      }
-    }
-    return { ...event, data };
-  });
 }
 
 async function rewriteJsonLines(path, transform) {

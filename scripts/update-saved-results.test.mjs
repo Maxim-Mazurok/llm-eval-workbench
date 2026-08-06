@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("saved result migration", () => {
-  it("backs up and atomically updates results, summaries, logs, and events", async () => {
+  it("backs up and atomically updates results, summaries, and logs", async () => {
     const runsDir = await fs.mkdtemp(join(tmpdir(), "humaneval-migration-test-"));
     tempDirs.push(runsDir);
     const runDir = join(runsDir, "run-directory");
@@ -54,12 +54,6 @@ describe("saved result migration", () => {
       JSON.stringify({ taskId: oldResult.taskId, attemptId: oldResult.attemptId, passNumber: 1, passed: false, channel: "extracted-code", text: oldResult.extractedCode }),
       JSON.stringify({ taskId: oldResult.taskId, attemptId: oldResult.attemptId, passNumber: 1, passed: false, channel: "harness", text: "SyntaxError" })
     ].join("\n") + "\n");
-    await fs.writeFile(join(runDir, "events.jsonl"), [
-      JSON.stringify({ type: "code-extracted", data: { taskId: oldResult.taskId, attemptId: oldResult.attemptId, passNumber: 1, code: oldResult.extractedCode } }),
-      JSON.stringify({ type: "task-finished", data: { taskId: oldResult.taskId, attemptId: oldResult.attemptId, passNumber: 1, result: oldResult, summary: oldRun } }),
-      JSON.stringify({ type: "done", data: { summary: oldRun } }),
-      "{truncated legacy event"
-    ].join("\n") + "\n");
     const executeTestsFn = vi.fn(async () => ({
       passed: true,
       tests: [{ source: "assert candidate(1) == 1", passed: true }],
@@ -92,12 +86,6 @@ describe("saved result migration", () => {
     expect(run).toMatchObject({ completed: 1, passed: 1, failed: 0, liveScore: 1, finalScore: 1, assertionsPassed: 1, assertionsTotal: 1 });
     const taskLogs = (await fs.readFile(join(runDir, "task-logs.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
     expect(taskLogs).toEqual([{ taskId: oldResult.taskId, attemptId: oldResult.attemptId, passNumber: 1, passed: true, channel: "extracted-code", text: "def answer(x):\n    return x" }]);
-    const eventLines = (await fs.readFile(join(runDir, "events.jsonl"), "utf8")).trim().split("\n");
-    const events = eventLines.slice(0, 3).map(JSON.parse);
-    expect(events[0].data.code).toBe("def answer(x):\n    return x");
-    expect(events[1].data).toMatchObject({ result: { passed: true }, summary: { passed: 1, failed: 0 } });
-    expect(events[2].data.summary).toMatchObject({ passed: 1, failed: 0, assertionsPassed: 1, assertionsTotal: 1 });
-    expect((await fs.readFile(join(runDir, "events.jsonl"), "utf8")).trim()).toContain("{truncated legacy event");
     expect(JSON.parse(await fs.readFile(join(backupDir, "run-directory", "results.json"), "utf8"))).toEqual([oldResult]);
 
     const secondPass = await migrateSavedResults({ runsDir, apply: false, executeTestsFn });
