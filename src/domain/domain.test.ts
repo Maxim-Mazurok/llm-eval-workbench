@@ -23,6 +23,7 @@ import {
 import { currentPassTiming } from "./passTiming";
 import { buildInstructionPromptFallback, formatPromptMessages } from "./prompts";
 import {
+  anyRunLive,
   assertionStats,
   completedMetricLines,
   failureStats,
@@ -30,6 +31,7 @@ import {
   progressSegments,
   resultNumbers,
   resultStatus,
+  runQueueBadgePosition,
   runTotal,
   scoreRange,
   speedStats
@@ -89,6 +91,20 @@ describe("benchmark API origin", () => {
 });
 
 describe("run domain helpers", () => {
+  it("reports a live queue and badge positions only for queued runs", () => {
+    expect(anyRunLive([])).toBe(false);
+    expect(anyRunLive([run({ status: "completed" }), run({ status: "cancelled" })])).toBe(false);
+    expect(anyRunLive([run({ status: "completed" }), run({ status: "running" })])).toBe(true);
+    expect(anyRunLive([run({ status: "queued" })])).toBe(true);
+
+    expect(runQueueBadgePosition(run({ status: "queued", queuePosition: 2 }))).toBe(2);
+    // A queued run already picked to start next has no position to show.
+    expect(runQueueBadgePosition(run({ status: "queued", queuePosition: null }))).toBeNull();
+    expect(runQueueBadgePosition(run({ status: "queued" }))).toBeNull();
+    // Stale positions on non-queued statuses never render a badge.
+    expect(runQueueBadgePosition(run({ status: "running", queuePosition: 1 }))).toBeNull();
+  });
+
   it("computes totals, score ranges, progress, assertions, and result numbers", () => {
     const sample = run({
       total: 4,

@@ -145,6 +145,18 @@ export function statusIsLive(status?: string) {
   return status === "running" || status === "queued";
 }
 
+// While any run is live the start/resume actions enqueue instead of starting,
+// so the buttons must read "Add to queue" rather than "Start run".
+export function anyRunLive(runs: BenchRun[] = []) {
+  return runs.some((run) => statusIsLive(run.status));
+}
+
+export function runQueueBadgePosition(run: BenchRun) {
+  return run.status === "queued" && typeof run.queuePosition === "number" && run.queuePosition > 0
+    ? run.queuePosition
+    : null;
+}
+
 // Runtime/network failures (e.g. "no model loaded") are recorded as
 // completed results so the run finishes normally, but the server discards
 // them on resume. A run stuck at "completed" purely because every remaining
