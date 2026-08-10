@@ -1,6 +1,12 @@
 import { packBenchmarkOptions } from "./benchmarkPacks";
 
-export const BENCH_API = "http://localhost:8787";
+export function benchmarkApiOrigin(pageUrl = window.location.href) {
+  const benchmarkApiUrl = new URL(pageUrl);
+  benchmarkApiUrl.port = "8787";
+  return benchmarkApiUrl.origin;
+}
+
+export const BENCH_API = benchmarkApiOrigin();
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = "llmEval.sidebar.collapsed";
 
 // Built-in ids are listed for readability; benchmark packs contribute ids this

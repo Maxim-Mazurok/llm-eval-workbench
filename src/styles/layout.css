@@ -82,10 +82,25 @@
   transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
-.run-tab:hover .run-delete,
-.run-tab:focus-within .run-delete {
-  opacity: 1;
-  pointer-events: auto;
+@media (hover: hover) and (pointer: fine) {
+  .run-tab:hover .run-delete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .run-tab.active .run-tab-main {
+    padding-right: 56px;
+  }
+
+  .run-tab.active .run-delete {
+    top: 12px;
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .run-delete:hover,

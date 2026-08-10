@@ -623,7 +623,7 @@ describe("App notifications", () => {
     await userEvent.click(resumeButton);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8787/api/runs/run-1/resume",
+      "http://127.0.0.1:8787/api/runs/run-1/resume",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -676,7 +676,7 @@ describe("App notifications", () => {
     await userEvent.click(resumeButton);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8787/api/runs/run-1/resume",
+      "http://127.0.0.1:8787/api/runs/run-1/resume",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
