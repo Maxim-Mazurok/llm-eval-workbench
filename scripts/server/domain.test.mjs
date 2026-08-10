@@ -13,10 +13,12 @@ import {
   normalizeBaseUrl,
   normalizeParallelTasks,
   normalizePassCount,
+  isLocalBaseUrl,
   normalizeTaskCount,
   parseTestNumbers,
   redactApiKey,
   renderPromptTemplate,
+  runHasModelErrorResults,
   runtimeConfigFromPersistedRun,
   runSummary,
   syncRunCountsFromResults
@@ -154,10 +156,22 @@ describe("server domain helpers", () => {
     expect(run).toMatchObject({ completed: 1, passed: 1, failed: 0 });
   });
 
-  it("redacts api keys for persisted public run config", () => {
+  it("redacts api keys for remote endpoints but keeps them for local ones", () => {
+    expect(redactApiKey(" sk-live-secret ", "https://api.example.com/v1")).toBe("***");
+    expect(redactApiKey("", "https://api.example.com/v1")).toBe("");
+    expect(redactApiKey(undefined, "https://api.example.com/v1")).toBe("");
     expect(redactApiKey(" sk-live-secret ")).toBe("***");
-    expect(redactApiKey("")).toBe("");
-    expect(redactApiKey(undefined)).toBe("");
+    expect(redactApiKey(" sk-live-secret ", "http://localhost:8000/v1")).toBe("sk-live-secret");
+    expect(redactApiKey(" sk-live-secret ", "http://127.0.0.1:8000/v1")).toBe("sk-live-secret");
+    expect(redactApiKey(" sk-live-secret ", "http://[::1]:8000/v1")).toBe("sk-live-secret");
+  });
+
+  it("recognizes local base URLs", () => {
+    expect(isLocalBaseUrl("http://localhost:8000/v1")).toBe(true);
+    expect(isLocalBaseUrl("http://127.0.0.1:8000/v1")).toBe(true);
+    expect(isLocalBaseUrl("http://[::1]:8000/v1")).toBe(true);
+    expect(isLocalBaseUrl("https://api.example.com/v1")).toBe(false);
+    expect(isLocalBaseUrl("not a url")).toBe(false);
   });
 
   it("restores runtime config from persisted public run state", () => {
@@ -197,6 +211,19 @@ describe("server domain helpers", () => {
       extraBody: { top_p: 0.8 },
       publicConfig: { apiKey: "***", timeoutSeconds: 15 }
     });
+  });
+
+  it("keeps a real api key for persisted local runs instead of redacting it", () => {
+    const runtimeConfig = runtimeConfigFromPersistedRun({
+      baseUrl: "http://localhost:8000/v1",
+      config: {
+        baseUrl: "http://localhost:8000/v1",
+        apiKey: "sk-live-secret"
+      }
+    });
+
+    expect(runtimeConfig.apiKey).toBe("sk-live-secret");
+    expect(runtimeConfig.publicConfig.apiKey).toBe("sk-live-secret");
   });
 
   it("discards model-error attempts before resuming a run", () => {
@@ -249,6 +276,21 @@ describe("server domain helpers", () => {
     expect(run.events.map((event) => event.type)).toEqual(["run-started", "task-started", "task-finished", "task-started"]);
     expect(run.events.some((event) => event.type === "error")).toBe(false);
     expect(run.events.some((event) => event.data.attemptId === "HumanEval/1::pass-1")).toBe(false);
+  });
+
+  it("detects a run with model-error results, even after a normal completion", () => {
+    const cleanRun = runFixture({
+      results: [{ taskId: "HumanEval/0", attemptId: "HumanEval/0::pass-1", passed: true, tests: [] }]
+    });
+    const erroredRun = runFixture({
+      results: [
+        { taskId: "HumanEval/0", attemptId: "HumanEval/0::pass-1", passed: true, tests: [] },
+        { taskId: "HumanEval/1", attemptId: "HumanEval/1::pass-1", passed: false, modelError: "Model request failed: HTTP 400 No model loaded.", tests: [] }
+      ]
+    });
+
+    expect(runHasModelErrorResults(cleanRun)).toBe(false);
+    expect(runHasModelErrorResults(erroredRun)).toBe(true);
   });
 
   it("writes run and result artifacts with public run state", async () => {

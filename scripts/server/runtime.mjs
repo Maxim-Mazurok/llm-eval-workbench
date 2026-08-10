@@ -19,6 +19,7 @@ import {
   redactApiKey,
   resultAttemptId,
   runDirName,
+  runHasModelErrorResults,
   runtimeConfigFromPersistedRun,
   runSummary,
   syncRunCountsFromResults
@@ -730,11 +731,12 @@ export function createRuntimeServer({
   // reply has no vision flag, but oMLX's admin API exposes model_type
   // ("vlm" | "llm" | "embedding" | ...). Best effort — any failure returns
   // null (capability unknown) so non-oMLX endpoints keep working.
-  async function fetchModelTypes(baseUrl) {
+  async function fetchModelTypes(baseUrl, apiKey) {
     try {
       const origin = new URL(baseUrl).origin;
       const response = await fetchImplementation(`${origin}/admin/api/models`, {
-        signal: AbortSignal.timeout(2000)
+        signal: AbortSignal.timeout(2000),
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
       });
       if (!response.ok) return null;
       const payload = await response.json();
@@ -755,9 +757,9 @@ export function createRuntimeServer({
   // them and the model answers from the text alone ("we cannot see the
   // photo"), producing garbage scores that look like a completed run. Refuse
   // up front whenever the capability is knowable.
-  async function assertModelCanSeeImages(baseUrl, modelId, benchmark, problems) {
+  async function assertModelCanSeeImages(baseUrl, modelId, benchmark, problems, apiKey) {
     if (!problems.some((problem) => Array.isArray(problem.images) && problem.images.length)) return;
-    const modelTypes = await fetchModelTypes(baseUrl);
+    const modelTypes = await fetchModelTypes(baseUrl, apiKey);
     const modelType = modelTypes?.get(String(modelId || "").trim());
     if (modelType !== undefined && modelType !== "vlm") {
       throw new Error(
@@ -773,7 +775,7 @@ export function createRuntimeServer({
     const baseUrl = normalizeBaseUrl(config.baseUrl);
     const benchmark = getBenchmark(config.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
-    await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems);
+    await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems, config.apiKey);
     const selectedIndices = parseTestNumbers(config.testNumbers, allProblems.length, benchmark.taskIdPattern);
     const adaptiveRepetitionPenalty = Boolean(config.adaptiveRepetitionPenalty);
     const repetitionPenalty = Number(config.repetitionPenalty ?? 1);
@@ -830,7 +832,7 @@ export function createRuntimeServer({
         timeoutSeconds: Number(config.timeoutSeconds ?? 15),
         parallelTasks,
         passCount,
-        apiKey: redactApiKey(config.apiKey),
+        apiKey: redactApiKey(config.apiKey, baseUrl),
         sampleLimit,
         startIndex,
         testNumbers: String(config.testNumbers || ""),
@@ -865,8 +867,8 @@ export function createRuntimeServer({
   function runCanResume(run) {
     if (run.deleted) return false;
     if (run.status === "running" || run.status === "queued") return false;
-    if (run.status === "completed") return false;
-    return run.completed < run.total;
+    if (run.status === "completed" && !runHasModelErrorResults(run)) return false;
+    return run.completed < run.total || runHasModelErrorResults(run);
   }
 
   // Async pre-checks for resume, separated so resumeRun itself stays
@@ -875,7 +877,7 @@ export function createRuntimeServer({
   async function assertRunResumable(run) {
     const benchmark = getBenchmark(run.benchmark);
     const problems = await loadBenchmarkProblems(benchmark);
-    await assertModelCanSeeImages(run.baseUrl, run.model, benchmark, problems);
+    await assertModelCanSeeImages(run.baseUrl, run.model, benchmark, problems, run.apiKey);
   }
 
   function resumeRun(run) {
@@ -1003,9 +1005,13 @@ export function createRuntimeServer({
         } catch {
           return sendJson(res, 400, { error: "baseUrl is not a valid URL" });
         }
+        // The UI forwards the API key as a bearer token rather than a query
+        // parameter so it never lands in server access logs or browser history.
+        const apiKey = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
         try {
           const upstream = await fetchImplementation(`${baseUrl}/models`, {
-            signal: AbortSignal.timeout(3000)
+            signal: AbortSignal.timeout(3000),
+            headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
           });
           if (!upstream.ok) {
             return sendJson(res, 502, { error: `Model endpoint replied HTTP ${upstream.status}` });
@@ -1013,7 +1019,7 @@ export function createRuntimeServer({
           const payload = await upstream.json();
           // modelType comes from oMLX's admin API ("vlm" = vision-capable);
           // null when the endpoint exposes no capability data.
-          const modelTypes = await fetchModelTypes(baseUrl);
+          const modelTypes = await fetchModelTypes(baseUrl, apiKey);
           const models = Array.isArray(payload?.data)
             ? payload.data
                 .filter((model) => typeof model?.id === "string")
@@ -1090,6 +1096,14 @@ export function createRuntimeServer({
           return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
         if (req.method === "POST" && runMatch[2] === "resume") {
+          const body = await readJsonBody(req);
+          // The field is the source of truth on every resume: a run's stored
+          // key can be stale (never set, redacted after a restart, or since
+          // rotated), so whatever is currently typed replaces it outright.
+          if (typeof body.apiKey === "string") {
+            run.apiKey = body.apiKey.trim();
+            run.publicConfig.apiKey = redactApiKey(run.apiKey, run.baseUrl);
+          }
           await assertRunResumable(run);
           const resumedRun = resumeRun(run);
           return sendJson(res, 200, runSummary(resumedRun, { includeResults: false }));

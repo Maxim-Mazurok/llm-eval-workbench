@@ -11,7 +11,7 @@ import { BENCH_API } from "../domain/benchmark";
  * /v1/models reply carries no vision-capability flag, so the list cannot be
  * filtered per benchmark.
  */
-export function useAvailableModels(baseUrl: string): {
+export function useAvailableModels(baseUrl: string, apiKey: string): {
   models: string[];
   /**
    * id → model_type from oMLX's admin API via the proxy ("vlm" = vision).
@@ -35,9 +35,13 @@ export function useAvailableModels(baseUrl: string): {
     // Debounced: baseUrl changes on every keystroke while the user edits it.
     const timer = setTimeout(async () => {
       try {
+        const trimmedApiKey = apiKey.trim();
         const response = await fetch(
           `${BENCH_API}/api/models?baseUrl=${encodeURIComponent(trimmed)}`,
-          { signal: controller.signal }
+          {
+            signal: controller.signal,
+            ...(trimmedApiKey ? { headers: { authorization: `Bearer ${trimmedApiKey}` } } : {})
+          }
         );
         if (!response.ok) {
           setModels([]);
@@ -69,6 +73,6 @@ export function useAvailableModels(baseUrl: string): {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [baseUrl, fetchTick]);
+  }, [apiKey, baseUrl, fetchTick]);
   return { models, modelTypes, refresh };
 }

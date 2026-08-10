@@ -80,6 +80,10 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     const option = benchmarkOption(config.benchmark ?? run.benchmark);
     setBenchmarkState(option.id);
     setBaseUrl(config.baseUrl ?? run.baseUrl ?? "");
+    // Remote runs only ever get a redacted "***" placeholder back from the
+    // server, so re-typing the key is required; local runs persist the real
+    // key and can restore it directly.
+    setApiKey(config.apiKey && config.apiKey !== "***" ? String(config.apiKey) : DEFAULT_FORM_VALUES.apiKey);
     setModel(config.model ?? run.model ?? "");
     setMaxOutputTokens(Number(config.maxOutputTokens ?? DEFAULT_FORM_VALUES.maxOutputTokens));
     setThinkingEnabled(config.thinkingEnabled ?? DEFAULT_FORM_VALUES.thinkingEnabled);

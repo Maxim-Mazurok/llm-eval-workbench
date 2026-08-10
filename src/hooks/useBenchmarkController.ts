@@ -366,7 +366,13 @@ export function useBenchmarkController() {
     if (!selectedRun || !runCanResume(selectedRun)) return;
     setError(null);
     try {
-      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/resume`, { method: "POST" });
+      // The field is the source of truth: always send its current value so a
+      // key typed in after the run stalled on a 401 actually gets used.
+      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/resume`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey })
+      });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to resume run");
       closeRunEvents(json.id);

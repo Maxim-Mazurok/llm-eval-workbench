@@ -83,7 +83,7 @@ export default function App() {
     models: availableModels,
     modelTypes: availableModelTypes,
     refresh: refreshAvailableModels
-  } = useAvailableModels(baseUrl);
+  } = useAvailableModels(baseUrl, apiKey);
 
   return (
     <main className={sidebarCollapsed ? "bench-shell sidebar-collapsed" : "bench-shell"}>

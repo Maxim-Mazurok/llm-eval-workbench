@@ -118,7 +118,7 @@ export function runtimeConfigFromPersistedRun(persisted) {
     benchmark: String(persistedConfig.benchmark ?? persisted.benchmark ?? "humaneval"),
     publicConfig: {
       ...persistedConfig,
-      apiKey: redactApiKey(persistedConfig.apiKey)
+      apiKey: redactApiKey(persistedConfig.apiKey, persistedConfig.baseUrl ?? persisted.baseUrl)
     },
     apiKey: persistedConfig.apiKey === "***" ? "" : String(persistedConfig.apiKey || "").trim(),
     temperature: Number(persistedConfig.temperature ?? persisted.temperature ?? 0),
@@ -173,6 +173,14 @@ export function syncRunCountsFromResults(run) {
   run.failed = failed;
 }
 
+// Runtime/network failures (e.g. "no model loaded") are recorded as
+// completed results so the run finishes normally, but discardResumeArtifacts
+// removes them on resume. A run stuck at "completed" purely because every
+// remaining task hit one of these errors still needs to be resumable.
+export function runHasModelErrorResults(run) {
+  return (run?.results || []).some((result) => Boolean(result.modelError));
+}
+
 const resumeDiscardEventTypes = new Set(["error", "token", "raw", "raw-delta", "code-extracted"]);
 
 export function discardResumeArtifacts(run) {
@@ -188,8 +196,23 @@ export function discardResumeArtifacts(run) {
   syncRunCountsFromResults(run);
 }
 
-export function redactApiKey(value) {
-  return String(value || "").trim() ? "***" : "";
+// Local endpoints (a model server on the same machine) never leave the
+// machine, so the API key they were started with is safe to persist and
+// restore on the next run. Anything else is redacted before it touches disk
+// or an /api/runs response.
+export function isLocalBaseUrl(baseUrl) {
+  try {
+    const hostname = new URL(String(baseUrl || "")).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return hostname === "localhost" || hostname === "::1" || hostname === "0.0.0.0" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function redactApiKey(value, baseUrl) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return isLocalBaseUrl(baseUrl) ? trimmed : "***";
 }
 
 export function formatRunDirTimestamp(value) {
