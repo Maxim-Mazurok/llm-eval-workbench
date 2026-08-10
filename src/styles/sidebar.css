@@ -130,6 +130,15 @@
   outline: 0;
 }
 
+.field input:disabled,
+.field textarea:disabled {
+  color: var(--muted);
+  background: #eef0ec;
+  border-color: var(--line);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .field textarea {
   resize: vertical;
   min-height: 104px;
