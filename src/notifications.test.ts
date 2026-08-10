@@ -78,7 +78,7 @@ describe("notifications", () => {
     expect(notificationsEnabledForRun("run-1", readDisabledRunNotificationIds(win))).toBe(true);
   });
 
-  it("dispatches only once per run id", () => {
+  it("dispatches only once per run id", async () => {
     const { win, calls } = notificationWindow("granted");
     const notifiedRunIds = new Set<string>();
     const run = {
@@ -89,8 +89,8 @@ describe("notifications", () => {
       selectedIndices: [0, 1]
     };
 
-    expect(dispatchRunNotification(run, "done", notifiedRunIds, win)).toBe(true);
-    expect(dispatchRunNotification(run, "done", notifiedRunIds, win)).toBe(false);
+    await expect(dispatchRunNotification(run, "done", notifiedRunIds, win)).resolves.toBe(true);
+    await expect(dispatchRunNotification(run, "done", notifiedRunIds, win)).resolves.toBe(false);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
@@ -99,14 +99,45 @@ describe("notifications", () => {
     });
   });
 
-  it("does not dispatch when permission is not granted", () => {
+  it("prefers persistent service worker notifications", async () => {
+    const { win, calls } = notificationWindow("granted");
+    const showNotification = vi.fn(async () => undefined);
+    const registration = { active: {}, showNotification };
+    const register = vi.fn(async () => registration);
+    Object.defineProperty(win, "navigator", {
+      value: {
+        serviceWorker: {
+          register,
+          ready: Promise.resolve(registration)
+        }
+      }
+    });
+
+    const dispatched = await dispatchRunNotification({
+      id: "run-1",
+      status: "completed",
+      model: "demo-model",
+      passed: 1,
+      total: 1
+    }, "done", new Set(), win);
+
+    expect(dispatched).toBe(true);
+    expect(register).toHaveBeenCalledWith("/notification-worker.js");
+    expect(showNotification).toHaveBeenCalledWith(
+      "HumanEval run finished",
+      expect.objectContaining({ tag: "run-1" })
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not dispatch when permission is not granted", async () => {
     const { win, calls } = notificationWindow("denied");
 
-    expect(dispatchRunNotification({
+    await expect(dispatchRunNotification({
       id: "run-1",
       status: "completed",
       passed: 1
-    }, "done", new Set(), win)).toBe(false);
+    }, "done", new Set(), win)).resolves.toBe(false);
 
     expect(calls).toHaveLength(0);
   });

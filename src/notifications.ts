@@ -42,6 +42,13 @@ function notificationApi(win: Window) {
   return browserNotificationsAvailable(win) ? (win as Window & { Notification: typeof Notification }).Notification : null;
 }
 
+async function notificationServiceWorkerRegistration(win: Window) {
+  const serviceWorker = win.navigator?.serviceWorker;
+  if (!serviceWorker) return null;
+  const registration = await serviceWorker.register("/notification-worker.js");
+  return registration.active ? registration : serviceWorker.ready;
+}
+
 export function readNotificationsEnabled(win: Window = window) {
   const api = notificationApi(win);
   return Boolean(api && api.permission === "granted");
@@ -53,7 +60,9 @@ export async function requestNotificationsEnabled(win: Window = window) {
   const permission = api.permission === "granted"
     ? "granted"
     : await api.requestPermission();
-  return permission === "granted";
+  if (permission !== "granted") return false;
+  notificationServiceWorkerRegistration(win).catch(() => undefined);
+  return true;
 }
 
 export function readDisabledRunNotificationIds(win: Window = window) {
@@ -98,7 +107,7 @@ export function buildRunNotification(run: RunNotificationSummary, eventType = ru
   };
 }
 
-export function dispatchRunNotification(
+export async function dispatchRunNotification(
   run: RunNotificationSummary,
   eventType: string,
   notifiedRunIds: Set<string>,
@@ -110,9 +119,20 @@ export function dispatchRunNotification(
   notifiedRunIds.add(run.id);
   const notification = buildRunNotification(run, eventType);
   try {
+    const registration = await notificationServiceWorkerRegistration(win);
+    if (registration) {
+      await registration.showNotification(notification.title, notification.options);
+      return true;
+    }
     new api(notification.title, notification.options);
     return true;
   } catch {
-    return false;
+    try {
+      new api(notification.title, notification.options);
+      return true;
+    } catch {
+      notifiedRunIds.delete(run.id);
+      return false;
+    }
   }
 }
