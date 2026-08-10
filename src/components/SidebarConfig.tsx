@@ -2,6 +2,7 @@ import {
   CircleStop,
   FileText,
   KeyRound,
+  ListPlus,
   PanelLeftClose,
   Play,
   RotateCcw,
@@ -44,6 +45,8 @@ export type SidebarConfigProps = {
   promptTemplate: string;
   extraBody: string;
   selectedRun: BenchRun | null;
+  /** True while any run is live, so start/resume enqueue instead of starting. */
+  queueActive: boolean;
   error: string | null;
   onCollapse: () => void;
   onStartRun: () => void;
@@ -217,11 +220,23 @@ export function SidebarConfig(props: SidebarConfigProps) {
         </div>
       ) : null}
       <div className="bench-actions">
-        <button className="primary-action" type="button" onClick={props.onStartRun} disabled={!props.model.trim()}>
-          <Play size={17} /> Start run
+        <button
+          className="primary-action"
+          title={props.queueActive ? "A run is in progress — this run will wait in the queue" : undefined}
+          type="button"
+          onClick={props.onStartRun}
+          disabled={!props.model.trim()}
+        >
+          {props.queueActive ? <><ListPlus size={17} /> Add to queue</> : <><Play size={17} /> Start run</>}
         </button>
-        <button className="secondary-action" type="button" onClick={props.onResumeRun} disabled={!runCanResume(props.selectedRun)}>
-          <RotateCcw size={17} /> Resume
+        <button
+          className="secondary-action"
+          title={props.queueActive ? "A run is in progress — the resume will wait in the queue" : undefined}
+          type="button"
+          onClick={props.onResumeRun}
+          disabled={!runCanResume(props.selectedRun)}
+        >
+          {props.queueActive ? <><ListPlus size={17} /> Queue resume</> : <><RotateCcw size={17} /> Resume</>}
         </button>
         <button className="secondary-action" type="button" onClick={props.onCancelRun} disabled={!statusIsLive(props.selectedRun?.status)}>
           <CircleStop size={17} /> Stop selected

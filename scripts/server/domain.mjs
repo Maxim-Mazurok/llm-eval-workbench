@@ -92,6 +92,9 @@ export function runSummary(run, { includeResults = true } = {}) {
     assertionsTotal,
     assertionScore: assertionsTotal ? assertionsPassed / assertionsTotal : 0,
     currentTaskId: run.currentTaskId,
+    // Place in the waiting line while status is "queued"; null once running.
+    queuedAt: run.queuedAt ?? null,
+    queuePosition: run.queuePosition ?? null,
     activeTaskIds: run.activeTaskIds || [],
     activeTaskStartedAt: run.activeTaskStartedAt || {},
     config: {

@@ -21,6 +21,7 @@ import {
 import { thinkingInCommentsStats, thinkingResultNumbers } from "../domain/comments";
 import { currentPassTiming } from "../domain/passTiming";
 import {
+  anyRunLive,
   currentTaskStartedAtMs,
   formatTime,
   liveEstimate,
@@ -114,6 +115,7 @@ export function useBenchmarkController() {
   const selectedRunNotificationsEnabled = selectedRun
     ? notificationsEnabledForRun(selectedRun.id, disabledNotificationRunIds)
     : true;
+  const queueActive = useMemo(() => anyRunLive(runs), [runs]);
 
   const tokensByAttempt = useMemo(() => deriveTokensByAttempt(tokens), [tokens]);
 
@@ -362,6 +364,22 @@ export function useBenchmarkController() {
     await loadRuns();
   }
 
+  // The queue badge's X. Cancelling a queued run is exactly "take it out of
+  // line": the server dequeues it and the run stays around as "cancelled",
+  // resumable or deletable later.
+  async function removeRunFromQueue(run: BenchRun) {
+    if (run.status !== "queued") return;
+    setError(null);
+    try {
+      const response = await fetch(`${BENCH_API}/api/runs/${run.id}/cancel`, { method: "POST" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Failed to remove run from queue");
+      await loadRuns();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : String(removeError));
+    }
+  }
+
   async function resumeRun() {
     if (!selectedRun || !runCanResume(selectedRun)) return;
     setError(null);
@@ -443,6 +461,7 @@ export function useBenchmarkController() {
     runs,
     selectedRunId,
     selectedRun,
+    queueActive,
     selectedScoreRange,
     selectedProgressSegments,
     selectedThinkingStats,
@@ -488,6 +507,7 @@ export function useBenchmarkController() {
     cancelRun,
     resumeRun,
     deleteRun,
+    removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
   };
