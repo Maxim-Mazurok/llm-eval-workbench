@@ -20,6 +20,8 @@ type RunFixture = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  queuedAt?: string | null;
+  queuePosition?: number | null;
   selectedIndices?: number[];
   config?: Record<string, unknown>;
   activeTaskIds?: string[];
@@ -1372,6 +1374,212 @@ describe("App notifications", () => {
 
     await waitFor(() => expect(FakeEventSource.instances[0].closed).toBe(true));
     expect(notificationCalls).toHaveLength(0);
+  });
+
+  it("swaps start and resume for add-to-queue buttons while a run is live", async () => {
+    window.history.replaceState(null, "", "/run/run-stopped");
+    const runningRun = baseRun({
+      id: "run-live",
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    const stoppedRun = baseRun({
+      id: "run-stopped",
+      status: "cancelled",
+      total: 3,
+      completed: 1,
+      passed: 1,
+      finishedAt: "2026-06-16T00:00:10.000Z"
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({ runs: [runningRun, stoppedRun] });
+      }
+      if (url.endsWith("/api/runs/run-live")) {
+        return jsonResponse({ ...runningRun, events: [] });
+      }
+      return jsonResponse({ ...stoppedRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /add to queue/i })).toBeInTheDocument();
+    const queueResumeButton = screen.getByRole("button", { name: /queue resume/i });
+    await waitFor(() => expect(queueResumeButton).toBeEnabled());
+    expect(screen.queryByRole("button", { name: /start run/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
+  });
+
+  it("shows queue position badges and removes a queued run when its badge is clicked", async () => {
+    const runningRun = baseRun({
+      id: "run-live",
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    const queuedFirst = baseRun({
+      id: "run-q1",
+      status: "queued",
+      model: "first-in-line",
+      queuedAt: "2026-06-16T00:01:00.000Z",
+      queuePosition: 1
+    });
+    const queuedSecond = baseRun({
+      id: "run-q2",
+      status: "queued",
+      model: "second-in-line",
+      queuedAt: "2026-06-16T00:02:00.000Z",
+      queuePosition: 2
+    });
+    let removed = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs/run-q1/cancel") && init?.method === "POST") {
+        removed = true;
+        return jsonResponse({ ...queuedFirst, status: "cancelled", queuePosition: null });
+      }
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({
+          runs: removed
+            ? [runningRun, { ...queuedFirst, status: "cancelled", queuePosition: null }, { ...queuedSecond, queuePosition: 1 }]
+            : [runningRun, queuedFirst, queuedSecond]
+        });
+      }
+      return jsonResponse({ ...runningRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const firstBadge = await screen.findByRole("button", {
+      name: "Remove benchmark run first-in-line from queue (position 1)"
+    });
+    expect(firstBadge).toHaveTextContent("1");
+    expect(screen.getByRole("button", {
+      name: "Remove benchmark run second-in-line from queue (position 2)"
+    })).toHaveTextContent("2");
+
+    await userEvent.click(firstBadge);
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-q1/cancel", { method: "POST" });
+    await screen.findByRole("button", {
+      name: "Remove benchmark run second-in-line from queue (position 1)"
+    });
+    expect(screen.getAllByRole("button", { name: /remove benchmark run/i })).toHaveLength(1);
+    expect(screen.getByText(/cancelled · 0\/2/)).toBeInTheDocument();
+  });
+
+  it("renumbers queue badges when the queue advances", async () => {
+    const runningRun = baseRun({
+      id: "run-live",
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    const queuedFirst = baseRun({
+      id: "run-q1",
+      status: "queued",
+      model: "first-in-line",
+      queuedAt: "2026-06-16T00:01:00.000Z",
+      queuePosition: 1
+    });
+    const queuedSecond = baseRun({
+      id: "run-q2",
+      status: "queued",
+      model: "second-in-line",
+      queuedAt: "2026-06-16T00:02:00.000Z",
+      queuePosition: 2
+    });
+    let advanced = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({
+          runs: advanced
+            ? [
+                { ...queuedFirst, status: "running", queuePosition: null },
+                { ...runningRun, status: "completed", completed: 2, passed: 2, finishedAt: "2026-06-16T00:05:00.000Z" },
+                { ...queuedSecond, queuePosition: 1 }
+              ]
+            : [runningRun, queuedFirst, queuedSecond]
+        });
+      }
+      return jsonResponse({ ...runningRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await screen.findByRole("button", {
+      name: "Remove benchmark run second-in-line from queue (position 2)"
+    });
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(3));
+
+    // The server finished the active run and promoted the first queued run;
+    // that run's run-started event is the signal that the queue advanced.
+    advanced = true;
+    FakeEventSource.instances[1].emit("run-started", {
+      type: "run-started",
+      at: "2026-06-16T00:05:00.000Z",
+      data: { summary: { ...queuedFirst, status: "running", queuePosition: null } }
+    });
+
+    await screen.findByRole("button", {
+      name: "Remove benchmark run second-in-line from queue (position 1)"
+    });
+    expect(screen.getAllByRole("button", { name: /remove benchmark run/i })).toHaveLength(1);
+  });
+
+  it("shows a run created while another is active as queued with its badge", async () => {
+    const runningRun = baseRun({
+      id: "run-live",
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    const queuedCreated = baseRun({
+      id: "run-new",
+      status: "queued",
+      model: "queued-model",
+      queuedAt: "2026-06-16T00:01:00.000Z",
+      queuePosition: 1
+    });
+    let created = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs") && init?.method === "POST") {
+        created = true;
+        return jsonResponse(queuedCreated, 201);
+      }
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({ runs: created ? [queuedCreated, runningRun] : [runningRun] });
+      }
+      if (url.endsWith("/api/runs/run-new")) {
+        return jsonResponse({ ...queuedCreated, events: [] });
+      }
+      return jsonResponse({ ...runningRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const addToQueueButton = await screen.findByRole("button", { name: /add to queue/i });
+    await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "queued-model");
+    await userEvent.click(addToQueueButton);
+
+    const badge = await screen.findByRole("button", {
+      name: "Remove benchmark run queued-model from queue (position 1)"
+    });
+    expect(badge).toHaveTextContent("1");
+    expect(screen.getByText(/queued · 0\/2/)).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/run/run-new");
   });
 
   it("selects a run from a /run/:id deep link", async () => {

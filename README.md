@@ -228,6 +228,16 @@ Use `Stop selected` to cancel an active run. If the run is incomplete, select it
 again and use `Resume` to continue only the attempts that do not already have
 saved results.
 
+Only one run executes at a time. While a run is in progress, `Start run` becomes
+`Add to queue` and `Resume` becomes `Queue resume`: the new or resumed run waits
+in a first-in-first-out queue and starts automatically when the active run
+finishes, errors, or is stopped. Each queued run's tab shows its place in line
+as a badge; hovering the badge turns the number into an `X` that removes the run
+from the queue (on touch screens the `X` appears next to the number on the
+selected tab). A run removed from the queue is kept as `cancelled`, so it can be
+queued again later or deleted. The queue lives in the benchmark server's memory
+and does not survive a server restart.
+
 Timing totals sum active task durations rather than wall time between the run's
 start and finish, so stopped or interrupted periods are excluded. New results
 include generation and test evaluation time; older saved results use their

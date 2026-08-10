@@ -31,6 +31,7 @@ export default function App() {
     runs,
     selectedRunId,
     selectedRun,
+    queueActive,
     selectedScoreRange,
     selectedProgressSegments,
     selectedThinkingStats,
@@ -76,6 +77,7 @@ export default function App() {
     cancelRun,
     resumeRun,
     deleteRun,
+    removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
   } = useBenchmarkController();
@@ -121,6 +123,7 @@ export default function App() {
           promptTemplate={promptTemplate}
           extraBody={extraBody}
           selectedRun={selectedRun}
+          queueActive={queueActive}
           error={error}
           onCollapse={() => setSidebarCollapsed(true)}
           onStartRun={startRun}
@@ -154,6 +157,7 @@ export default function App() {
           onSelectNew={selectNewBench}
           onNavigate={navigateTo}
           onDelete={deleteRun}
+          onRemoveFromQueue={removeRunFromQueue}
         />
         <StatusSummary
           selectedRun={selectedRun}

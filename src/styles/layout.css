@@ -109,6 +109,85 @@
   border-color: #e2a198;
 }
 
+/* Notification-style badge showing a queued run's place in line. */
+.queue-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  color: #ffffff;
+  background: var(--brick);
+  border: 0;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.queue-badge:hover,
+.queue-badge:focus-visible {
+  background: #8a2d18;
+}
+
+.queue-badge .queue-badge-remove {
+  display: none;
+}
+
+/* Tab text must clear the badge plus the delete control beside it. */
+.run-tab.queued .run-tab-main {
+  padding-right: 74px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* Hovering (or focusing) the badge swaps the number for a remove control. */
+  .queue-badge:hover .queue-badge-position,
+  .queue-badge:focus-visible .queue-badge-position {
+    display: none;
+  }
+
+  .queue-badge:hover .queue-badge-remove,
+  .queue-badge:focus-visible .queue-badge-remove {
+    display: inline-flex;
+  }
+
+  /* Keep the delete control visible beside the badge, not underneath it. */
+  .run-tab.queued .run-delete {
+    right: 40px;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  /* Without hover the selected tab shows the remove control inline next to
+     the number; tapping any other tab's badge just selects that tab. */
+  .run-tab:not(.active) .queue-badge {
+    pointer-events: none;
+  }
+
+  .run-tab.active .queue-badge {
+    top: 12px;
+    height: 28px;
+  }
+
+  .run-tab.active .queue-badge .queue-badge-remove {
+    display: inline-flex;
+  }
+
+  .run-tab.active.queued .queue-badge {
+    right: 60px;
+  }
+
+  .run-tab.active.queued .run-tab-main {
+    padding-right: 112px;
+  }
+}
+
 .status-dot {
   width: 9px;
   height: 9px;
