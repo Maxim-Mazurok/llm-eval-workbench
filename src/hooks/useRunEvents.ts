@@ -90,6 +90,10 @@ export function useRunEvents({
         closeRunEvents(runId);
         loadRuns().catch(() => undefined);
       }
+      // A run starting means the queue advanced (the previous active run may
+      // have ended without a visible terminal event, e.g. it was deleted);
+      // refetch so every queued run's badge position renumbers.
+      if (event.type === "run-started") loadRuns().catch(() => undefined);
     };
     for (const name of ["run-started", "task-started", "prompt", "token", "raw-delta", "code-extracted", "task-finished", "done", "error"]) {
       source.addEventListener(name, handle);

@@ -53,6 +53,9 @@ describe("notifications", () => {
     expect(isTerminalNotificationStatus("cancelled")).toBe(true);
     expect(isTerminalNotificationStatus("running")).toBe(false);
     expect(notificationEventIsTerminal("done")).toBe(true);
+    // "error" being terminal is what closes SSE streams and refreshes queue
+    // badges when a run is cancelled or fails.
+    expect(notificationEventIsTerminal("error")).toBe(true);
     expect(notificationEventIsTerminal("task-finished")).toBe(false);
   });
 
