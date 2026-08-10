@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  benchmarkApiOrigin,
   type BenchResult,
   type BenchRun,
   type EventEnvelope,
@@ -77,6 +78,14 @@ const run = (overrides: Partial<BenchRun>): BenchRun => ({
   activeTaskIds: [],
   results: [],
   ...overrides
+});
+
+describe("benchmark API origin", () => {
+  it("uses the frontend hostname with the benchmark server port", () => {
+    expect(benchmarkApiOrigin("http://192.168.0.235:5173/run/example")).toBe(
+      "http://192.168.0.235:8787"
+    );
+  });
 });
 
 describe("run domain helpers", () => {
