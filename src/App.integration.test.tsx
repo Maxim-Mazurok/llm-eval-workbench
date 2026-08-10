@@ -208,6 +208,7 @@ describe("App notifications", () => {
       config: {
         baseUrl: "http://saved.example/v1",
         model: "saved-model",
+        apiKey: "sk-live-secret",
         maxOutputTokens: 4096,
         timeoutSeconds: 60,
         parallelTasks: 8,
@@ -239,6 +240,8 @@ describe("App notifications", () => {
     await waitFor(() => expect(modelInput).toHaveValue("saved-model"));
     expect(window.location.pathname).toBe("/run/run-1");
     expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://saved.example/v1");
+    // A real api key persisted for a local run's config loads back into the form.
+    expect(screen.getByPlaceholderText("optional")).toHaveValue("sk-live-secret");
 
     await userEvent.click(screen.getByRole("button", { name: /new bench/i }));
     expect(window.location.pathname).toBe("/new");
@@ -621,9 +624,65 @@ describe("App notifications", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8787/api/runs/run-1/resume",
-      { method: "POST" }
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey: "" })
+      }
     );
     await waitFor(() => expect(screen.queryByText(/old stale output/i)).not.toBeInTheDocument());
+  });
+
+  it("enables resume for a completed run whose only failures are modelErrors", async () => {
+    window.history.replaceState(null, "", "/run/run-1");
+    const completedWithModelErrors = baseRun({
+      status: "completed",
+      total: 2,
+      completed: 2,
+      passed: 1,
+      failed: 1,
+      finishedAt: "2026-06-16T00:00:10.000Z",
+      results: [
+        { taskId: "HumanEval/0", index: 0, passed: true, entryPoint: "foo", prompt: "def foo(): pass", test: "assert foo()", tests: [] },
+        {
+          taskId: "HumanEval/1",
+          index: 1,
+          passed: false,
+          entryPoint: "bar",
+          prompt: "def bar(): pass",
+          test: "assert bar()",
+          tests: [],
+          modelError: "Model request failed: HTTP 400 No model loaded."
+        }
+      ]
+    });
+    const resumedRun = baseRun({ ...completedWithModelErrors, status: "running", finishedAt: null, failed: 0, completed: 1, results: [completedWithModelErrors.results[0]] });
+    const fetchMock = vi.fn((input: RequestInfo | URL, requestInit?: RequestInit) => {
+      const requestUrl = String(input);
+      if (requestUrl.endsWith("/api/runs/run-1/resume") && requestInit?.method === "POST") {
+        return jsonResponse(resumedRun);
+      }
+      if (requestUrl.endsWith("/api/runs")) {
+        return jsonResponse({ runs: [completedWithModelErrors] });
+      }
+      return jsonResponse({ ...completedWithModelErrors, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const resumeButton = await screen.findByRole("button", { name: /resume/i });
+    await waitFor(() => expect(resumeButton).toBeEnabled());
+    await userEvent.click(resumeButton);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8787/api/runs/run-1/resume",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey: "" })
+      }
+    );
   });
 
   it("only shows the remaining metric for runs that are in progress", async () => {

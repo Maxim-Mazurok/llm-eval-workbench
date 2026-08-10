@@ -145,10 +145,20 @@ export function statusIsLive(status?: string) {
   return status === "running" || status === "queued";
 }
 
+// Runtime/network failures (e.g. "no model loaded") are recorded as
+// completed results so the run finishes normally, but the server discards
+// them on resume. A run stuck at "completed" purely because every remaining
+// task hit one of these errors still needs the Resume button enabled.
+export function runHasModelErrorResults(run?: BenchRun | null) {
+  return (run?.results || []).some((result) => Boolean(result.modelError));
+}
+
 export function runCanResume(run?: BenchRun | null) {
   if (!run) return false;
-  if (statusIsLive(run.status) || run.status === "completed") return false;
-  return run.completed < runTotal(run);
+  if (statusIsLive(run.status)) return false;
+  const hasModelErrors = runHasModelErrorResults(run);
+  if (run.status === "completed" && !hasModelErrors) return false;
+  return run.completed < runTotal(run) || hasModelErrors;
 }
 
 export function statusIsInProgress(status?: string) {

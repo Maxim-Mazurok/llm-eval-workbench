@@ -135,6 +135,27 @@ describe("runtime server", () => {
     expect(missing.status).toBe(400);
   });
 
+  it("forwards the Authorization header to the upstream endpoint and its admin API", async () => {
+    const rootDir = await makeRootDir();
+    const seenAuthorizationHeaders = [];
+    const { apiUrl } = await startRuntime(rootDir, {
+      fetchImplementation: async (url, options) => {
+        seenAuthorizationHeaders.push([String(url), options?.headers?.authorization]);
+        if (String(url) === "http://models.test/v1/models") {
+          return new Response(JSON.stringify({ data: [{ id: "text-model" }] }));
+        }
+        return new Response("not found", { status: 404 });
+      }
+    });
+
+    await fetch(`${apiUrl}/api/models?baseUrl=http://models.test/v1/`, {
+      headers: { authorization: "Bearer sk-live-secret" }
+    }).then((response) => response.json());
+
+    expect(seenAuthorizationHeaders).toContainEqual(["http://models.test/v1/models", "Bearer sk-live-secret"]);
+    expect(seenAuthorizationHeaders).toContainEqual(["http://models.test/admin/api/models", "Bearer sk-live-secret"]);
+  });
+
   it("rejects a non-positive adaptive starting penalty", async () => {
     const rootDir = await makeRootDir();
     const { apiUrl } = await startRuntime(rootDir);
@@ -270,8 +291,10 @@ describe("runtime server", () => {
     expect(model.requests[0].headers.authorization).toBe("Bearer sk-secret");
     expect(model.requests[0].body).toMatchObject({ model: "test-model", stream: true });
     expect(model.requests[0].body).not.toHaveProperty("repetition_penalty");
-    // API key never appears in the summary or persisted artifacts.
-    expect(JSON.stringify(detail)).not.toContain("sk-secret");
+    // The model server binds to a local address, so the api key is saved
+    // alongside the run (convenient re-runs on your own machine) and shows up
+    // in the run's config, including the config snapshots embedded in events.
+    expect(detail.config.apiKey).toBe("sk-secret");
 
     const runsList = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
     expect(runsList.runs.map((run) => run.id)).toContain(created.id);
@@ -285,7 +308,10 @@ describe("runtime server", () => {
     });
     const resultsJson = JSON.parse(await fs.readFile(join(runDir, "results.json"), "utf8"));
     expect(resultsJson).toHaveLength(2);
-    expect(JSON.stringify(JSON.parse(await fs.readFile(join(runDir, "run.json"), "utf8")))).not.toContain("sk-secret");
+    // ...but the persisted run.json for a local endpoint does carry the real
+    // key, so a resumed or re-run process can reuse it without re-entry.
+    const persistedRun = JSON.parse(await fs.readFile(join(runDir, "run.json"), "utf8"));
+    expect(persistedRun.config.apiKey).toBe("sk-secret");
     const taskLogs = (await fs.readFile(join(runDir, "task-logs.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     const logChannels = new Set(taskLogs.map((entry) => entry.channel));
     for (const channel of ["prompt", "model-output", "thinking-output", "extracted-code"]) {
@@ -345,6 +371,29 @@ describe("runtime server", () => {
     expect(failed.passed).toBe(false);
     const succeeded = detail.results.find((result) => result.taskId === "HumanEval/1");
     expect(succeeded.passed).toBe(true);
+  });
+
+  it("allows resuming a completed run whose only remaining failures are modelErrors", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No model loaded." } }));
+      },
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(detail).toMatchObject({ status: "completed", completed: 1, passed: 0, failed: 1 });
+    expect(detail.results[0].modelError).toContain("HTTP 400");
+
+    const resumed = await fetch(`${apiUrl}/api/runs/${created.id}/resume`, { method: "POST" }).then((response) => response.json());
+    expect(resumed.status).toBe("queued");
+    const resumedDetail = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(resumedDetail).toMatchObject({ completed: 1, passed: 1, failed: 0 });
+    expect(resumedDetail.results[0].modelError).toBeUndefined();
   });
 
   it("runs multiple passes with parallel workers and distinct attempt ids", async () => {
@@ -577,6 +626,68 @@ describe("runtime server", () => {
     expect(reloaded.config).toMatchObject({ maxOutputTokens: 999, testNumbers: "0-1" });
     expect(reloaded.results).toHaveLength(2);
     expect(reloaded.results[0].extractedCode).toBe(goodSolutions.add_one);
+  });
+
+  it("keeps a local run's saved api key usable across a restart and resume", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`);
+        hangingResponses.push(res);
+        req.on("close", () => res.end());
+      },
+      goodModelHandler
+    ]);
+    const first = await startRuntime(rootDir);
+
+    const created = await createRun(first.apiUrl, model.baseUrl, { apiKey: "sk-secret", testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    await fetch(`${first.apiUrl}/api/runs/${created.id}/cancel`, { method: "POST" });
+    await waitForStatus(first.apiUrl, created.id, ["cancelled"]);
+
+    // A fresh process reloading the persisted run should see the real key,
+    // not a "***" placeholder, because the model server is on a local address.
+    const second = await startRuntime(rootDir);
+    const reloaded = await fetch(`${second.apiUrl}/api/runs/${created.id}`).then((response) => response.json());
+    expect(reloaded.config.apiKey).toBe("sk-secret");
+
+    const resumed = await fetch(`${second.apiUrl}/api/runs/${created.id}/resume`, { method: "POST" }).then((response) => response.json());
+    expect(resumed.status).toBe("queued");
+    const detail = await waitForStatus(second.apiUrl, created.id, ["completed"]);
+    expect(detail).toMatchObject({ completed: 1, passed: 1 });
+    expect(model.requests.at(-1).headers.authorization).toBe("Bearer sk-secret");
+  });
+
+  it("uses the api key sent with a resume request instead of the run's stored one", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Not authenticated" } }));
+      },
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { apiKey: "sk-wrong", testNumbers: "0" });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(detail.results[0].modelError).toContain("HTTP 401");
+
+    const resumeResponse = await fetch(`${apiUrl}/api/runs/${created.id}/resume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ apiKey: "sk-correct" })
+    });
+    const resumed = await resumeResponse.json();
+    expect(resumed.status).toBe("queued");
+    // The field's value replaced the stored key, so the retried request
+    // succeeds and the persisted config reflects it (local endpoint).
+    expect(resumed.config.apiKey).toBe("sk-correct");
+    const resumedDetail = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(resumedDetail).toMatchObject({ completed: 1, passed: 1, failed: 0 });
+    expect(model.requests.at(-1).headers.authorization).toBe("Bearer sk-correct");
   });
 
   it("sends thinking configuration and a combined token budget to the model", async () => {
