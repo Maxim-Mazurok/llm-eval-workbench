@@ -370,12 +370,18 @@ export function useBenchmarkController() {
   async function removeRunFromQueue(run: BenchRun) {
     if (run.status !== "queued") return;
     setError(null);
+    // The server answers a queued cancel with a terminal "error" event, which
+    // would otherwise fire a "run stopped" OS notification for a deliberate
+    // one-click dequeue.
+    const alreadyNotified = notifiedRunsRef.current.has(run.id);
+    notifiedRunsRef.current.add(run.id);
     try {
       const response = await fetch(`${BENCH_API}/api/runs/${run.id}/cancel`, { method: "POST" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || "Failed to remove run from queue");
       await loadRuns();
     } catch (removeError) {
+      if (!alreadyNotified) notifiedRunsRef.current.delete(run.id);
       setError(removeError instanceof Error ? removeError.message : String(removeError));
     }
   }
@@ -393,6 +399,9 @@ export function useBenchmarkController() {
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to resume run");
+      // A run that already notified once (stopped, or removed from the queue)
+      // must notify again when this fresh attempt reaches a terminal state.
+      notifiedRunsRef.current.delete(json.id);
       closeRunEvents(json.id);
       setEvents([]);
       setTokens([]);

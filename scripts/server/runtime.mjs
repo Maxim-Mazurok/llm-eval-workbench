@@ -90,6 +90,10 @@ export function createRuntimeServer({
     run.queuedAt = new Date().toISOString();
     runQueue.push(run.id);
     syncQueuePositions();
+    // A run can wait in line for hours before anything else touches disk, and
+    // a restart only restores runs that have artifacts; persist now so a
+    // waiting run reloads as "interrupted" (resumable) instead of vanishing.
+    persistRunArtifacts(run);
     // Deferred so the HTTP response that triggered the enqueue serializes the
     // "queued" state before the run (possibly) flips to "running".
     queueMicrotask(processQueue);
@@ -103,12 +107,15 @@ export function createRuntimeServer({
   }
 
   function processQueue() {
-    if (activeRunId) {
-      const activeRun = runs.get(activeRunId);
-      if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) return;
-      activeRunId = null;
-    }
     while (runQueue.length) {
+      // INVARIANT: at most one run executes at a time. The guard sits inside
+      // the loop so that once a run is launched, the next iteration sees the
+      // occupied slot and stops instead of draining the rest of the queue.
+      if (activeRunId) {
+        const activeRun = runs.get(activeRunId);
+        if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) return;
+        activeRunId = null;
+      }
       const nextRun = runs.get(runQueue.shift());
       syncQueuePositions();
       if (!nextRun || nextRun.deleted || nextRun.cancelled || nextRun.status !== "queued") continue;
@@ -117,7 +124,6 @@ export function createRuntimeServer({
         if (activeRunId === nextRun.id) activeRunId = null;
         processQueue();
       });
-      return;
     }
   }
 
