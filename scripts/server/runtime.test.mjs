@@ -431,6 +431,41 @@ describe("runtime server", () => {
     expect(result.error).toContain("timed out");
   }, 15_000);
 
+  it("invalidates an incomplete model stream and reruns the task on resume", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "```python\ndef add_one(x):\n" } }] })}\n\n`);
+        response.end();
+      },
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    const interrupted = await waitForStatus(apiUrl, created.id, ["error"]);
+    expect(interrupted).toMatchObject({ completed: 0, passed: 0, failed: 0, results: [] });
+    expect(interrupted.events).toContainEqual(expect.objectContaining({
+      type: "task-invalidated",
+      data: expect.objectContaining({
+        taskId: "HumanEval/0",
+        attemptId: "HumanEval/0::pass-1",
+        reason: "Model response stream ended before completion."
+      })
+    }));
+    expect(interrupted.events.some((event) => event.type === "code-extracted")).toBe(false);
+
+    await fetch(`${apiUrl}/api/runs/${created.id}/resume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const completed = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(completed).toMatchObject({ completed: 1, passed: 1, failed: 0 });
+    expect(completed.results).toHaveLength(1);
+  });
+
   it("cancels a running run, then resumes it to completion", async () => {
     const rootDir = await makeRootDir();
     let hangingResponses = [];
