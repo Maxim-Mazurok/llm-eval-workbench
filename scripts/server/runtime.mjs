@@ -305,6 +305,7 @@ export function createRuntimeServer({
       });
     }
 
+    let receivedDoneMarker = false;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -315,7 +316,11 @@ export function createRuntimeServer({
         for (const line of frame.split("\n")) {
           if (!line.startsWith("data:")) continue;
           const payload = line.slice(5).trim();
-          if (!payload || payload === "[DONE]") continue;
+          if (!payload) continue;
+          if (payload === "[DONE]") {
+            receivedDoneMarker = true;
+            continue;
+          }
           let parsed;
           try {
             parsed = JSON.parse(payload);
@@ -352,6 +357,11 @@ export function createRuntimeServer({
     }));
     if (loopDetection && run.adaptiveRepetitionPenalty) return responseResult();
     throwIfRetryableModelOutput(thinking, output);
+    if (!receivedDoneMarker && !finishReason) {
+      const error = new Error("Model response stream ended before completion.");
+      error.name = "IncompleteModelResponseError";
+      throw error;
+    }
     return responseResult();
   }
 
@@ -535,6 +545,16 @@ export function createRuntimeServer({
             generation = await callModel(run, problem, index, context);
           } catch (error) {
             if (run.cancelled) throw error;
+            if (error instanceof Error && error.name === "IncompleteModelResponseError") {
+              appendEvent(run, "task-invalidated", {
+                taskId: problem.task_id,
+                index,
+                ...context,
+                reason: error.message,
+                summary: runSummary(run, { includeResults: false })
+              });
+              throw error;
+            }
             const result = {
               taskId: problem.task_id,
               attemptId,
