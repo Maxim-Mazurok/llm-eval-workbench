@@ -106,6 +106,17 @@ function loopingThenGoodModelHandler(req, res, body) {
 
 const { createRun, startModelServer, startRuntime, waitForStatus } = harness;
 
+// Streams one token, then hangs until the client aborts, so a run stays
+// "running" for as long as a test needs an occupied execution slot.
+function makeHangingModelHandler(hangingResponses) {
+  return (req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`);
+    hangingResponses.push(res);
+    req.on("close", () => res.end());
+  };
+}
+
 describe("runtime server", () => {
   it("proxies the endpoint's model list through /api/models", async () => {
     const rootDir = await makeRootDir();
@@ -758,4 +769,186 @@ describe("runtime server", () => {
       chat_template_kwargs: { enable_thinking: false }
     });
   });
+
+  it("queues new runs behind the active one and starts them strictly one at a time", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([
+      makeHangingModelHandler(hangingResponses),
+      makeHangingModelHandler(hangingResponses),
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const first = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+
+    const second = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    expect(second).toMatchObject({ status: "queued", queuePosition: 1 });
+    const third = await createRun(apiUrl, model.baseUrl, { testNumbers: "2" });
+    expect(third).toMatchObject({ status: "queued", queuePosition: 2 });
+
+    // Queued runs never touch the model while the first run is active.
+    expect(model.requests).toHaveLength(1);
+    const listed = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
+    const listedById = new Map(listed.runs.map((run) => [run.id, run]));
+    expect(listedById.get(second.id)).toMatchObject({ status: "queued", queuePosition: 1 });
+    expect(listedById.get(third.id)).toMatchObject({ status: "queued", queuePosition: 2 });
+
+    await fetch(`${apiUrl}/api/runs/${first.id}/cancel`, { method: "POST" });
+    await waitForStatus(apiUrl, first.id, ["cancelled"]);
+    // Exactly one queued run is promoted; the one behind it keeps waiting.
+    const secondRunning = await waitForStatus(apiUrl, second.id, ["running"]);
+    expect(secondRunning.queuePosition).toBeNull();
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(2));
+    const thirdWaiting = await fetch(`${apiUrl}/api/runs/${third.id}`).then((response) => response.json());
+    expect(thirdWaiting).toMatchObject({ status: "queued", queuePosition: 1 });
+    expect(model.requests).toHaveLength(2);
+
+    await fetch(`${apiUrl}/api/runs/${second.id}/cancel`, { method: "POST" });
+    await waitForStatus(apiUrl, second.id, ["cancelled"]);
+    const thirdDetail = await waitForStatus(apiUrl, third.id, ["completed"]);
+    expect(thirdDetail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
+  }, 15_000);
+
+  it("releases the execution slot when the active run is deleted", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([makeHangingModelHandler(hangingResponses), goodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const active = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    const queued = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    expect(queued).toMatchObject({ status: "queued", queuePosition: 1 });
+
+    await fetch(`${apiUrl}/api/runs/${active.id}`, { method: "DELETE" });
+    const detail = await waitForStatus(apiUrl, queued.id, ["completed"]);
+    expect(detail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
+    const missing = await fetch(`${apiUrl}/api/runs/${active.id}`);
+    expect(missing.status).toBe(404);
+  }, 15_000);
+
+  it("takes a cancelled queued run out of the line and moves later runs up", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([makeHangingModelHandler(hangingResponses), goodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const first = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    const second = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    const third = await createRun(apiUrl, model.baseUrl, { testNumbers: "2" });
+
+    const removed = await fetch(`${apiUrl}/api/runs/${second.id}/cancel`, { method: "POST" })
+      .then((response) => response.json());
+    expect(removed).toMatchObject({ status: "cancelled", queuePosition: null });
+    const thirdAfterRemoval = await fetch(`${apiUrl}/api/runs/${third.id}`).then((response) => response.json());
+    expect(thirdAfterRemoval).toMatchObject({ status: "queued", queuePosition: 1 });
+
+    await fetch(`${apiUrl}/api/runs/${first.id}/cancel`, { method: "POST" });
+    const thirdDetail = await waitForStatus(apiUrl, third.id, ["completed"]);
+    expect(thirdDetail).toMatchObject({ completed: 1, passed: 1 });
+    // The dequeued run never started and stays resumable later.
+    const secondDetail = await fetch(`${apiUrl}/api/runs/${second.id}`).then((response) => response.json());
+    expect(secondDetail).toMatchObject({ status: "cancelled", completed: 0 });
+    expect(model.requests).toHaveLength(2);
+
+    // A run cancelled out of the queue re-enqueues cleanly via resume.
+    const requeued = await fetch(`${apiUrl}/api/runs/${second.id}/resume`, { method: "POST" })
+      .then((response) => response.json());
+    expect(requeued).toMatchObject({ status: "queued", queuePosition: 1 });
+    const requeuedDetail = await waitForStatus(apiUrl, second.id, ["completed"]);
+    expect(requeuedDetail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
+  }, 15_000);
+
+  it("drops a deleted queued run from the line", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([makeHangingModelHandler(hangingResponses), goodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const first = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    const second = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    const third = await createRun(apiUrl, model.baseUrl, { testNumbers: "2" });
+    expect(third.queuePosition).toBe(2);
+
+    await fetch(`${apiUrl}/api/runs/${second.id}`, { method: "DELETE" });
+    const thirdAfterDelete = await fetch(`${apiUrl}/api/runs/${third.id}`).then((response) => response.json());
+    expect(thirdAfterDelete).toMatchObject({ status: "queued", queuePosition: 1 });
+
+    await fetch(`${apiUrl}/api/runs/${first.id}/cancel`, { method: "POST" });
+    const thirdDetail = await waitForStatus(apiUrl, third.id, ["completed"]);
+    expect(thirdDetail).toMatchObject({ completed: 1, passed: 1 });
+    const missing = await fetch(`${apiUrl}/api/runs/${second.id}`);
+    expect(missing.status).toBe(404);
+    expect(model.requests).toHaveLength(2);
+  }, 15_000);
+
+  it("persists a waiting queued run so a restart reloads it as interrupted", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([makeHangingModelHandler(hangingResponses), goodModelHandler]);
+    const first = await startRuntime(rootDir);
+
+    const active = await createRun(first.apiUrl, model.baseUrl, { testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    const queued = await createRun(first.apiUrl, model.baseUrl, { testNumbers: "1" });
+    expect(queued.status).toBe("queued");
+    // Artifact writes are fire-and-forget; wait until the waiting run's
+    // queued state has actually reached disk.
+    await vi.waitFor(async () => {
+      const runDirs = await fs.readdir(join(rootDir, "benchmark-runs"));
+      const queuedDir = runDirs.find((dir) => dir.endsWith(queued.id));
+      expect(queuedDir).toBeTruthy();
+      const runJson = JSON.parse(await fs.readFile(join(rootDir, "benchmark-runs", queuedDir, "run.json"), "utf8"));
+      expect(runJson.status).toBe("queued");
+    });
+
+    // The queue itself does not survive a restart, but the run must: it
+    // reloads as "interrupted" (resumable) rather than vanishing.
+    const second = await startRuntime(rootDir);
+    const reloaded = await fetch(`${second.apiUrl}/api/runs/${queued.id}`).then((response) => response.json());
+    expect(reloaded).toMatchObject({ status: "interrupted", queuePosition: null, completed: 0 });
+
+    // Unblock the hanging model connection so harness cleanup can close it.
+    await fetch(`${first.apiUrl}/api/runs/${active.id}/cancel`, { method: "POST" });
+    await waitForStatus(first.apiUrl, queued.id, ["completed"]);
+  }, 15_000);
+
+  it("queues a resume while another run is active", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No model loaded." } }));
+      },
+      makeHangingModelHandler(hangingResponses),
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const stalled = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await waitForStatus(apiUrl, stalled.id, ["completed"]);
+    const active = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+
+    const resumed = await fetch(`${apiUrl}/api/runs/${stalled.id}/resume`, { method: "POST" })
+      .then((response) => response.json());
+    expect(resumed).toMatchObject({ status: "queued", queuePosition: 1 });
+    // The resume waits in line while the active run keeps its slot.
+    const stillQueued = await fetch(`${apiUrl}/api/runs/${stalled.id}`).then((response) => response.json());
+    expect(stillQueued).toMatchObject({ status: "queued", queuePosition: 1 });
+    // Resuming a run that is already waiting in line is rejected, so a
+    // double-click cannot enqueue the same run twice.
+    const doubleResume = await fetch(`${apiUrl}/api/runs/${stalled.id}/resume`, { method: "POST" });
+    expect(doubleResume.status).toBe(500);
+    await expect(doubleResume.json()).resolves.toEqual({ error: "Run cannot be resumed." });
+
+    await fetch(`${apiUrl}/api/runs/${active.id}/cancel`, { method: "POST" });
+    const detail = await waitForStatus(apiUrl, stalled.id, ["completed"]);
+    expect(detail).toMatchObject({ completed: 1, passed: 1, failed: 0, queuePosition: null });
+  }, 15_000);
 });

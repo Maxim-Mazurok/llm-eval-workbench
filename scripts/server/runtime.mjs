@@ -71,6 +71,61 @@ export function createRuntimeServer({
   const runsDir = join(rootDir, "benchmark-runs");
   const runs = new Map();
   const taskLogWriteQueues = new Map();
+  // Only one benchmark run executes at a time (a local model server can't
+  // serve two runs at once without wrecking both runs' timings). Everything
+  // else waits in this FIFO of run ids; queuePosition on each run is the
+  // 1-based place in line that the UI shows as a badge.
+  const runQueue = [];
+  let activeRunId = null;
+
+  function syncQueuePositions() {
+    for (const run of runs.values()) {
+      const queueIndex = runQueue.indexOf(run.id);
+      run.queuePosition = queueIndex === -1 ? null : queueIndex + 1;
+    }
+  }
+
+  function enqueueRun(run) {
+    run.status = "queued";
+    run.queuedAt = new Date().toISOString();
+    runQueue.push(run.id);
+    syncQueuePositions();
+    // A run can wait in line for hours before anything else touches disk, and
+    // a restart only restores runs that have artifacts; persist now so a
+    // waiting run reloads as "interrupted" (resumable) instead of vanishing.
+    persistRunArtifacts(run);
+    // Deferred so the HTTP response that triggered the enqueue serializes the
+    // "queued" state before the run (possibly) flips to "running".
+    queueMicrotask(processQueue);
+    return run;
+  }
+
+  function dequeueRun(run) {
+    const queueIndex = runQueue.indexOf(run.id);
+    if (queueIndex !== -1) runQueue.splice(queueIndex, 1);
+    syncQueuePositions();
+  }
+
+  function processQueue() {
+    while (runQueue.length) {
+      // INVARIANT: at most one run executes at a time. The guard sits inside
+      // the loop so that once a run is launched, the next iteration sees the
+      // occupied slot and stops instead of draining the rest of the queue.
+      if (activeRunId) {
+        const activeRun = runs.get(activeRunId);
+        if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) return;
+        activeRunId = null;
+      }
+      const nextRun = runs.get(runQueue.shift());
+      syncQueuePositions();
+      if (!nextRun || nextRun.deleted || nextRun.cancelled || nextRun.status !== "queued") continue;
+      activeRunId = nextRun.id;
+      runBenchmark(nextRun).finally(() => {
+        if (activeRunId === nextRun.id) activeRunId = null;
+        processQueue();
+      });
+    }
+  }
 
   function loadBenchmarkProblems(benchmark) {
     return benchmark.loadProblems({ cacheDir, fetchImplementation });
@@ -880,7 +935,7 @@ export function createRuntimeServer({
     };
     if (!run.model) throw new Error("Model name is required.");
     runs.set(id, run);
-    queueMicrotask(() => runBenchmark(run));
+    enqueueRun(run);
     return run;
   }
 
@@ -915,7 +970,6 @@ export function createRuntimeServer({
       );
     }
     run.cancelled = false;
-    run.status = "queued";
     run.finishedAt = null;
     run.activeTaskIds = [];
     run.activeTaskStartedAt = {};
@@ -923,8 +977,7 @@ export function createRuntimeServer({
     run.abortController = null;
     run.abortControllers = new Set();
     discardResumeArtifacts(run);
-    queueMicrotask(() => runBenchmark(run));
-    return run;
+    return enqueueRun(run);
   }
 
   async function loadPersistedRuns() {
@@ -945,6 +998,8 @@ export function createRuntimeServer({
           ...persisted,
           ...persistedRuntimeConfig,
           dir,
+          // The queue does not survive a restart; a persisted position is stale.
+          queuePosition: null,
           activeTaskIds: [],
           activeTaskStartedAt: {},
           events: [],
@@ -1086,6 +1141,7 @@ export function createRuntimeServer({
         if (req.method === "DELETE" && !runMatch[2]) {
           run.deleted = true;
           run.cancelled = true;
+          dequeueRun(run);
           for (const controller of run.abortControllers || []) controller.abort();
           run.abortController?.abort();
           for (const client of run.clients) client.end();
@@ -1107,6 +1163,9 @@ export function createRuntimeServer({
         if (req.method === "POST" && runMatch[2] === "cancel") {
           run.cancelled = true;
           if (run.status === "queued") {
+            // Cancelling a waiting run just takes it out of line; runs behind
+            // it move up. The aborts below cover the already-started case.
+            dequeueRun(run);
             run.status = "cancelled";
             run.finishedAt = new Date().toISOString();
             appendEvent(run, "error", { message: "Run cancelled.", summary: runSummary(run, { includeResults: false }) });
