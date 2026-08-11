@@ -36,7 +36,9 @@ import {
 } from "./repetitionDetector.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const defaultRootDir = join(__dirname, "../..");
+// LLM_EVAL_ROOT_DIR relocates benchmark-runs/ and .cache/ (Playwright starts
+// a throwaway server that must never share artifacts with a live one).
+const defaultRootDir = process.env.LLM_EVAL_ROOT_DIR || join(__dirname, "../..");
 const LOOP_DETECTION_CHECK_INTERVAL_CHARACTERS = 512;
 
 // Benchmarks that ship binary assets (photographs, audio, ...) expose
