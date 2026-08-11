@@ -12,7 +12,7 @@ import {
 } from "../domain/passes";
 import { buildInstructionPromptFallback } from "../domain/prompts";
 import { recordTaskResultsRenderMeasurement, textByteLength } from "../domain/performanceMetrics";
-import { formatAssert, formatDuration, pct, resultScore, runPassCount } from "../domain/runs";
+import { formatAssert, formatDuration, pct, resultHasDetectedLoop, resultScore, runPassCount } from "../domain/runs";
 import { orderedChannelOutput } from "../domain/tasks";
 
 function primaryResultStatus(
@@ -269,7 +269,7 @@ export function TaskResults({
                 <span className={`${primaryResultStatus(groupStatus, result)}-pill`}>
                   {primaryResultStatus(groupStatus, result)}
                 </span>
-                {group.attempts.some((attempt) => attempt.result?.looping) ? <span className="loop-pill">loop</span> : null}
+                {group.attempts.some((attempt) => attempt.result && resultHasDetectedLoop(attempt.result)) ? <span className="loop-pill">loop</span> : null}
               </span>
               <strong>{group.taskId}</strong>
               <small>
@@ -305,7 +305,7 @@ export function TaskResults({
                             <span className={`${primaryResultStatus(tabGroup.status, attempt.result)}-pill`}>
                               {primaryResultStatus(tabGroup.status, attempt.result)}
                             </span>
-                            {tabGroup.attempts.some((tabAttempt) => tabAttempt.result?.looping) ? <span className="loop-pill">loop</span> : null}
+                            {tabGroup.attempts.some((tabAttempt) => tabAttempt.result && resultHasDetectedLoop(tabAttempt.result)) ? <span className="loop-pill">loop</span> : null}
                           </span>
                           <strong>{passRangeLabel(tabGroup.startPass, tabGroup.endPass, passTotal)}</strong>
                           <small>

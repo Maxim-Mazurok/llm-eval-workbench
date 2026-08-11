@@ -368,13 +368,13 @@ describe("App notifications", () => {
     expect(clipboardWrite).toHaveBeenCalledWith("7");
   });
 
-  it("shows when a detected loop was allowed to finish", async () => {
+  it("labels a failed detected loop when generation was allowed to finish", async () => {
     window.history.replaceState(null, "", "/run/run-1");
     const recoveredRun = baseRun({
       status: "completed",
       total: 1,
       completed: 1,
-      passed: 1,
+      failed: 1,
       config: { adaptiveRepetitionPenalty: false },
       results: [{
         taskId: "HumanEval/7",
@@ -383,7 +383,7 @@ describe("App notifications", () => {
         passTotal: 1,
         index: 7,
         entryPoint: "recovered_task",
-        passed: true,
+        passed: false,
         loopDetection: {
           channel: "thinking",
           repetitions: 5,
@@ -391,7 +391,7 @@ describe("App notifications", () => {
           matchedWords: 225,
           excerpt: "repeated reasoning"
         },
-        tests: [{ source: "assert recovered_task()", passed: true }],
+        tests: [{ source: "assert recovered_task()", passed: false }],
         prompt: "def recovered_task(): return True",
         test: "assert recovered_task()",
         rawOutput: "```python\ndef recovered_task(): return True\n```",
@@ -407,7 +407,9 @@ describe("App notifications", () => {
 
     render(<App />);
 
-    await userEvent.click(await screen.findByRole("button", { name: /HumanEval\/7/i }));
+    const taskButton = await screen.findByRole("button", { name: /HumanEval\/7/i });
+    expect(taskButton.querySelector(".status-badges")).toHaveTextContent("failloop");
+    await userEvent.click(taskButton);
     expect(await screen.findByText(/Generation continued to its normal finish\./)).toBeInTheDocument();
     expect(screen.queryByText(/Generation stopped early\./)).not.toBeInTheDocument();
   });

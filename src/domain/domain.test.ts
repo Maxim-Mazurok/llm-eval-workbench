@@ -166,17 +166,29 @@ describe("run domain helpers", () => {
     const harnessError = result({ index: 9, passed: false, tests: [], traceback: "SyntaxError" });
     const looping = result({ index: 12, passed: false, tests: [], looping: true });
     const passingLoop = result({ index: 13, passed: true, tests: [{ source: "answer matches", passed: true }], looping: true });
-    const sample = run({ results: [assertionFailure, harnessError, looping] });
+    const detectedLoop = result({
+      index: 17,
+      passed: false,
+      tests: [{ source: "assert detected", passed: false }],
+      loopDetection: {
+        channel: "output",
+        repetitions: 5,
+        patternWords: 40,
+        matchedWords: 200,
+        excerpt: "repeated output"
+      }
+    });
+    const sample = run({ results: [assertionFailure, harnessError, looping, detectedLoop] });
 
     expect(resultStatus(assertionFailure)).toBe("fail");
     expect(resultStatus(harnessError)).toBe("error");
     expect(resultStatus(looping)).toBe("loop");
     expect(resultStatus(passingLoop)).toBe("pass");
-    expect(failureStats([passingLoop])).toEqual({ failedAssertions: 0, partial: 0, errors: 0, looping: 0 });
-    expect(failureStats(sample.results)).toEqual({ failedAssertions: 1, partial: 0, errors: 1, looping: 1 });
-    expect(resultNumbers(sample, "fail")).toBe("4");
+    expect(failureStats([passingLoop])).toEqual({ failedAssertions: 0, partial: 0, errors: 0, looping: 1 });
+    expect(failureStats(sample.results)).toEqual({ failedAssertions: 2, partial: 0, errors: 1, looping: 2 });
+    expect(resultNumbers(sample, "fail")).toBe("4, 17");
     expect(resultNumbers(sample, "error")).toBe("9");
-    expect(resultNumbers(sample, "loop")).toBe("12");
+    expect(resultNumbers(sample, "loop")).toBe("12, 17");
     expect(resultNumbers(run({ results: [passingLoop] }), "pass")).toBe("13");
 
     const repeatedPasses = run({
@@ -233,6 +245,25 @@ describe("run domain helpers", () => {
       results: running.results
     });
     expect(speedStats(pausedCompletedRun, [], nowMs)).toEqual({ averageTask: "17s", elapsed: "34s" });
+
+    const parallelRun = run({
+      status: "running",
+      total: 4,
+      completed: 2,
+      currentTaskId: "HumanEval/2",
+      activeTaskIds: ["HumanEval/2", "HumanEval/3"],
+      config: { parallelTasks: 2 },
+      results: [
+        result({ generationMs: 10_000 }),
+        result({ taskId: "HumanEval/1", generationMs: 10_000 })
+      ]
+    });
+    const parallelEvents: EventEnvelope[] = [
+      { type: "task-started", at: "2026-06-16T00:00:25.000Z", data: { taskId: "HumanEval/2" } },
+      { type: "task-started", at: "2026-06-16T00:00:25.000Z", data: { taskId: "HumanEval/3" } }
+    ];
+    expect(liveEstimate(parallelRun, parallelEvents, nowMs)?.expectedTotal).toBe("20s");
+    expect(speedStats(parallelRun, parallelEvents, nowMs)).toEqual({ averageTask: "10s", elapsed: "15s" });
 
     const nearlyCompletedParallelRun = run({
       status: "running",
