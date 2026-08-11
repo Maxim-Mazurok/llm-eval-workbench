@@ -225,15 +225,15 @@
   opacity: 0.55;
 }
 
-.model-combobox {
+.searchable-combobox {
   position: relative;
 }
 
-.model-combobox input {
+.searchable-combobox input {
   padding-right: 34px;
 }
 
-.model-combobox-toggle {
+.searchable-combobox-toggle {
   position: absolute;
   top: 50%;
   right: 6px;
@@ -250,12 +250,12 @@
   cursor: pointer;
 }
 
-.model-combobox-toggle:hover {
+.searchable-combobox-toggle:hover {
   color: var(--ink);
   background: rgba(0, 0, 0, 0.05);
 }
 
-.model-combobox-list {
+.searchable-combobox-list {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -272,7 +272,7 @@
   box-shadow: 0 10px 28px rgba(15, 23, 20, 0.14);
 }
 
-.model-combobox-list li {
+.searchable-combobox-list li {
   padding: 8px 10px;
   overflow: hidden;
   font-size: 13px;
@@ -282,34 +282,34 @@
   cursor: pointer;
 }
 
-.model-combobox-list li.highlighted {
+.searchable-combobox-list li.highlighted {
   background: rgba(18, 97, 78, 0.1);
 }
 
-.model-combobox-list li[aria-selected="true"] {
+.searchable-combobox-list li[aria-selected="true"] {
   font-weight: 700;
 }
 
-.model-combobox-list li.model-combobox-empty {
+.searchable-combobox-list li.searchable-combobox-empty {
   color: var(--muted);
   font-size: 12px;
   cursor: default;
 }
 
-.model-combobox-list li {
+.searchable-combobox-list li {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
 }
 
-.model-combobox-list li span {
+.searchable-combobox-list li span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 /* Capability tag from oMLX model_type ("vision" for vlm models). */
-.model-combobox-tag {
+.searchable-combobox-tag {
   flex: none;
   padding: 1px 7px;
   color: #12614e;

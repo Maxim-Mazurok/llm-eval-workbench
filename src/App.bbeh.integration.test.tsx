@@ -150,7 +150,8 @@ describe("App bbeh benchmark", () => {
     expect(systemPromptField.value).toBe(DEFAULT_SYSTEM_PROMPT);
     expect(screen.getByText(/Executes model-generated Python locally/)).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("Benchmark"), "bbeh-mini");
+    await userEvent.click(screen.getByRole("combobox", { name: "Benchmark" }));
+    await userEvent.click(screen.getByRole("option", { name: "BBEH Mini (corrected)" }));
 
     expect(systemPromptField.value).toBe(BBEH_SYSTEM_PROMPT);
     expect((screen.getByLabelText("Prompt template") as HTMLTextAreaElement).value).toContain("%problem%");
@@ -191,7 +192,8 @@ describe("App bbeh benchmark", () => {
     render(<App />);
 
     const systemPromptField = screen.getByLabelText("System prompt") as HTMLTextAreaElement;
-    await userEvent.selectOptions(screen.getByLabelText("Benchmark"), "person-props-age-photos");
+    await userEvent.click(screen.getByRole("combobox", { name: "Benchmark" }));
+    await userEvent.click(screen.getByRole("option", { name: "Person Props: Age from photos only (vision)" }));
     await waitFor(() => expect(systemPromptField.value).toBe(datasetSystemPrompt));
 
     await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "demo-model");
@@ -254,13 +256,13 @@ describe("App bbeh benchmark", () => {
 
     render(<App />);
 
-    const benchmarkSelect = await screen.findByLabelText("Benchmark") as HTMLSelectElement;
-    await waitFor(() => expect(benchmarkSelect.value).toBe("bbeh-mini"));
+    const benchmarkCombobox = await screen.findByLabelText("Benchmark") as HTMLInputElement;
+    await waitFor(() => expect(benchmarkCombobox.value).toBe("BBEH Mini (corrected)"));
     expect((screen.getByLabelText("System prompt") as HTMLTextAreaElement).value).toBe(BBEH_SYSTEM_PROMPT);
 
     await userEvent.click(screen.getByRole("button", { name: /new bench/i }));
 
-    await waitFor(() => expect(benchmarkSelect.value).toBe("humaneval"));
+    await waitFor(() => expect(benchmarkCombobox.value).toBe("HumanEval (code)"));
     expect((screen.getByLabelText("System prompt") as HTMLTextAreaElement).value).toBe(DEFAULT_SYSTEM_PROMPT);
   });
 });

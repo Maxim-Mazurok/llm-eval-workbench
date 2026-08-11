@@ -1,6 +1,8 @@
 import { Plus, Trash2, X } from "lucide-react";
-import type { BenchRoute, BenchRun } from "../domain/benchmark";
+import { useState } from "react";
+import { benchmarkOption, runBenchmarkId, type BenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
 import { formatTime, runQueueBadgePosition, runTotal, statusIsLive } from "../domain/runs";
+import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
 
 export function RunStrip({
   runs,
@@ -17,9 +19,37 @@ export function RunStrip({
   onDelete: (run: BenchRun) => void;
   onRemoveFromQueue: (run: BenchRun) => void;
 }) {
+  const [benchmarkFilter, setBenchmarkFilter] = useState<BenchmarkId | "">("");
+  const [modelFilter, setModelFilter] = useState("");
+  const normalizedModelFilter = modelFilter.trim().toLocaleLowerCase();
+  const availableModels = Array.from(new Set(runs.map((run) => run.model).filter(Boolean))).sort();
+  const filteredRuns = runs.filter((run) => {
+    return (!benchmarkFilter || runBenchmarkId(run) === benchmarkFilter)
+      && (run.model ?? "").toLocaleLowerCase().includes(normalizedModelFilter);
+  });
+
   return (
     <section className="run-strip">
       <div className="pane-head">Benchmarks</div>
+      <div className="run-filters">
+        <label>
+          <BenchmarkCombobox
+            ariaLabel="Filter by benchmark name"
+            placeholder="All benchmarks"
+            value={benchmarkFilter}
+            onChange={setBenchmarkFilter}
+          />
+        </label>
+        <label>
+          <ModelCombobox
+            ariaLabel="Filter by model"
+            models={availableModels}
+            placeholder="Model"
+            value={modelFilter}
+            onChange={setModelFilter}
+          />
+        </label>
+      </div>
       <div className="run-list">
         <div className={selectedRunId === null ? "run-tab new-run-tab active" : "run-tab new-run-tab"}>
           <button className="run-tab-main" type="button" onClick={onSelectNew}>
@@ -28,8 +58,9 @@ export function RunStrip({
             <small>Default parameters</small>
           </button>
         </div>
-        {runs.length ? runs.map((candidate) => {
+        {filteredRuns.length ? filteredRuns.map((candidate) => {
           const queuePosition = runQueueBadgePosition(candidate);
+          const benchmarkName = benchmarkOption(runBenchmarkId(candidate)).label;
           const tabClasses = [
             "run-tab",
             candidate.id === selectedRunId ? "active" : "",
@@ -40,7 +71,7 @@ export function RunStrip({
               <button className="run-tab-main" type="button" onClick={() => onNavigate({ view: "run", id: candidate.id })}>
                 <span className={`status-dot ${statusIsLive(candidate.status) ? "live" : ""}`} />
                 <strong>{candidate.model || "model"}</strong>
-                <small>{candidate.status} · {candidate.completed}/{runTotal(candidate)} · {formatTime(candidate.createdAt)}</small>
+                <small>{benchmarkName} · {candidate.status} · {candidate.completed}/{runTotal(candidate)} · {formatTime(candidate.createdAt)}</small>
               </button>
               {queuePosition ? (
                 <button
@@ -65,7 +96,11 @@ export function RunStrip({
               </button>
             </div>
           );
-        }) : <p className="empty-copy">No benchmark runs recorded yet.</p>}
+        }) : (
+          <p className="empty-copy">
+            {runs.length ? "No benchmark runs match these filters." : "No benchmark runs recorded yet."}
+          </p>
+        )}
       </div>
     </section>
   );

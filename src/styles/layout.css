@@ -8,10 +8,45 @@
 
 .run-strip {
   min-width: 0;
-  overflow: hidden;
   background: rgba(251, 251, 246, 0.94);
   border: 1px solid var(--line);
   border-radius: 6px;
+}
+
+.run-filters {
+  display: flex;
+  gap: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+  border-top: 1px solid var(--line);
+}
+
+.run-filters label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 180px;
+  max-width: 280px;
+}
+
+.run-filters input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 34px 0 10px;
+  background: #fbfbf6;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+}
+
+.run-filters .searchable-combobox {
+  width: 100%;
+}
+
+.run-filters input:focus {
+  border-color: var(--green);
+  outline: 2px solid rgba(61, 112, 66, 0.15);
 }
 
 .run-list {
@@ -21,6 +56,16 @@
   gap: 1px;
   overflow-x: auto;
   background: var(--line);
+}
+
+@media (max-width: 560px) {
+  .run-filters {
+    flex-wrap: wrap;
+  }
+
+  .run-filters label {
+    max-width: none;
+  }
 }
 
 .run-tab {
