@@ -11,13 +11,12 @@ import {
   TerminalSquare
 } from "lucide-react";
 import {
-  BENCHMARK_OPTIONS,
   benchmarkOption,
   type BenchmarkId,
   type BenchRun
 } from "../domain/benchmark";
 import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive } from "../domain/runs";
-import { ModelCombobox } from "./ModelCombobox";
+import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
 
 export type SidebarConfigProps = {
   benchmark: BenchmarkId;
@@ -104,14 +103,12 @@ export function SidebarConfig(props: SidebarConfigProps) {
       </label>
       <label className="field">
         <span><FileText size={14} /> Benchmark</span>
-        <select
+        <BenchmarkCombobox
           value={props.benchmark}
-          onChange={(event) => props.setBenchmark(event.target.value as BenchmarkId)}
-        >
-          {BENCHMARK_OPTIONS.map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
-          ))}
-        </select>
+          onChange={(benchmark) => {
+            if (benchmark) props.setBenchmark(benchmark);
+          }}
+        />
       </label>
       <label className="field">
         <span><Server size={14} /> Base URL</span>
