@@ -1,7 +1,7 @@
-import { Plus, Trash2, X } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { benchmarkOption, runBenchmarkId, type BenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
-import { formatTime, runQueueBadgePosition, runTotal, statusIsLive } from "../domain/runs";
+import { benchmarkOption, runBenchmarkId, runBenchmarkScoring, type BenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
+import { formatTime, pct, progressSegments, runMeanScore, runQueueBadgePosition, runTotal, statusIsLive } from "../domain/runs";
 import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
 
 export function RunStrip({
@@ -61,6 +61,11 @@ export function RunStrip({
         {filteredRuns.length ? filteredRuns.map((candidate) => {
           const queuePosition = runQueueBadgePosition(candidate);
           const benchmarkName = benchmarkOption(runBenchmarkId(candidate)).label;
+          const total = runTotal(candidate);
+          const progress = progressSegments(candidate);
+          const gradedScoring = runBenchmarkScoring(candidate) === "graded";
+          const score = gradedScoring ? runMeanScore(candidate) : candidate.liveScore;
+          const completed = candidate.status === "completed";
           const tabClasses = [
             "run-tab",
             candidate.id === selectedRunId ? "active" : "",
@@ -69,9 +74,25 @@ export function RunStrip({
           return (
             <div className={tabClasses} key={candidate.id}>
               <button className="run-tab-main" type="button" onClick={() => onNavigate({ view: "run", id: candidate.id })}>
-                <span className={`status-dot ${statusIsLive(candidate.status) ? "live" : ""}`} />
+                <span className={`status-dot ${statusIsLive(candidate.status) ? "live" : ""} ${completed ? "completed" : ""}`}>
+                  {completed ? <Check aria-hidden="true" size={9} strokeWidth={3} /> : null}
+                </span>
                 <strong>{candidate.model || "model"}</strong>
-                <small>{benchmarkName} · {candidate.status} · {candidate.completed}/{runTotal(candidate)} · {formatTime(candidate.createdAt)}</small>
+                <small className="run-tab-benchmark">{benchmarkName}</small>
+                <small className="run-tab-metrics" title={`Started ${formatTime(candidate.createdAt)}`}>
+                  <span>{candidate.status}</span>
+                  <span className="run-tab-count">{candidate.completed}/{total}</span>
+                  <b>score {pct(score)}</b>
+                </small>
+                <span
+                  aria-label={`Progress: ${candidate.completed} of ${total} tasks, ${pct(score)} score`}
+                  className="run-tab-progress"
+                  role="img"
+                >
+                  <span className="run-tab-progress-failed" style={{ width: `${progress.failed}%` }} />
+                  <span className="run-tab-progress-passed" style={{ width: `${progress.passed}%` }} />
+                  <span className="run-tab-progress-remaining" style={{ width: `${progress.remaining}%` }} />
+                </span>
               </button>
               {queuePosition ? (
                 <button

@@ -1473,7 +1473,7 @@ describe("App notifications", () => {
       name: "Remove benchmark run second-in-line from queue (position 1)"
     });
     expect(screen.getAllByRole("button", { name: /remove benchmark run/i })).toHaveLength(1);
-    expect(screen.getByText(/cancelled · 0\/2/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^first-in-line/ })).toHaveTextContent(/cancelled.*0\/2/);
   });
 
   it("renumbers queue badges when the queue advances", async () => {
@@ -1580,7 +1580,7 @@ describe("App notifications", () => {
       name: "Remove benchmark run queued-model from queue (position 1)"
     });
     expect(badge).toHaveTextContent("1");
-    expect(screen.getByText(/queued · 0\/2/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^queued-model/ })).toHaveTextContent(/queued.*0\/2/);
     expect(window.location.pathname).toBe("/run/run-new");
     // The backend answered with queue fields, so no version warning appears.
     expect(screen.queryByText(/older version without run queueing/)).not.toBeInTheDocument();
@@ -1651,7 +1651,7 @@ describe("App notifications", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByPlaceholderText("provider/model-name")).toHaveValue("deep-link-model"));
-    expect(screen.getByText("completed")).toBeInTheDocument();
+    expect(screen.getAllByText("completed")).not.toHaveLength(0);
     expect(window.location.pathname).toBe("/run/run-2");
   });
 
