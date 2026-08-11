@@ -88,6 +88,11 @@ describe("benchmark API origin", () => {
       "http://192.168.0.235:8787"
     );
   });
+
+  it("prefers an explicitly configured benchmark API URL", () => {
+    expect(benchmarkApiOrigin("http://192.168.0.235:5173/run/example", "http://127.0.0.1:9999/"))
+      .toBe("http://127.0.0.1:9999");
+  });
 });
 
 describe("run domain helpers", () => {
