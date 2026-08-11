@@ -25,6 +25,11 @@ Conclusions:
 
 - 81.7% - 8192 thinking, 16384 tokens, 1 pass, gemma-4-26B-A4B-it-QAT-MLX-4bit, 6h50m
 
+### gemma-4-31b
+
+- 97.6% - unlimited thinking, 16384 tokens, 1 pass, unsloth/gemma-4-31B-it-qat-GGUF + MTP (via unsloth), 4h47m (looped similarly to MLX in 3 tasks but used up all on thinking so failed; only 116 was a genuine failure - passed 9/10 assertions) - used more RAM than MLX
+- 100% - 8192 thinking, 16384 tokens, 1 pass, gemma-4-31B-it-MLX-4bit + VLM MTP gemma-4-31B-it-assistant-bf16, 5h43m
+
 ### Qwen3.6-27B
 
 - [WIP 74/164 42.7%-97.6%] 94.6% - 8192 thinking, 16384 tokens, 1 pass, Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit, 2h17m (failed: 32 (infinite loop), 41 (comment parsed as code), 65, 68)
@@ -35,6 +40,7 @@ Conclusions:
 - Qwen3.6-27B is a very strong model
 - MXFP4 runs 2.5x faster than 6bit and fits much more comfortably on the 32GB MBP M5, same eval accuracy
 - Opus-Distilled quite a bit lower accuracy than base, might be more clever on math since that is what it was distilled on for the most part
+- Gemma-4-31B is very strong, barely fits tho
 
 ### gpt-oss-20b
 
@@ -53,6 +59,8 @@ Conclusions:
 - [WIP 55/460 2.2%-90.2%] - 18.2% - 8192? thinking, 16384 tokens, 1 pass, gpt-oss-20b-MXFP4-Q8, 2h15m, `BBEH Mini (official data)`
 - [WIP 29/460 0%-93.7%] - 0% - 16384 thinking, 18432 tokens, 1 pass, gemma-4-12B-it-8bit + VLM MTP gemma-4-12B-it-qat-assistant-bf16 block-size 3, 8h14m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` - looping all the time, both with default and 1.08 repetition penalty
 - [WIP 23/460 2%-97%] - 39.1% - 16384 thinking, 18432 tokens, 1 pass, gemma-4-12B-it-8bit, 13h, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1`
+
+- [WIP 62/460 8.9%-95.4%] - 66.1% - 8192 thinking, 16384 tokens, 1 pass, gemma-4-31B-it-MLX-4bit + VLM MTP gemma-4-31B-it-assistant-bf16, 9h45m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` - was hitting token limits, increasing them might improve score
 
 Conclusions:
 - gemma-4-12B-it-8bit keeps thinking whole token budget even when forced to answer when using VLM MTP gemma-4-12B-it-qat-assistant-bf16, without it - stops thinking at limit and answers; Disabled in https://github.com/jundot/omlx/commit/9387ebddf6f62b27ac0547ca82e09fd0f418bf40
