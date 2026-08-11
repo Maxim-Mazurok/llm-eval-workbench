@@ -221,13 +221,6 @@ export function liveEstimate(
   );
   const activeTaskCount = Math.min(activeTaskDurationsMilliseconds.length, remainingTasks);
   const queuedTaskCount = remainingTasks - activeTaskCount;
-  const activeTasksRemainingMilliseconds = activeTaskDurationsMilliseconds.reduce(
-    (totalMilliseconds, durationMilliseconds) => (
-      totalMilliseconds + Math.max(averageTaskMilliseconds - durationMilliseconds, 0)
-    ),
-    0
-  );
-  const remainingActiveMilliseconds = activeTasksRemainingMilliseconds + (averageTaskMilliseconds * queuedTaskCount);
   const remainingMilliseconds = estimatedParallelRemainingMilliseconds(
     activeTaskDurationsMilliseconds,
     queuedTaskCount,
@@ -238,10 +231,15 @@ export function liveEstimate(
     (totalMilliseconds, durationMilliseconds) => totalMilliseconds + durationMilliseconds,
     0
   );
+  const elapsedMilliseconds = parallelAdjustedDurationMilliseconds(
+    completedTaskMilliseconds + currentActiveMilliseconds,
+    parallelTasks,
+    total
+  );
   return {
     remaining: formatDuration(remainingMilliseconds),
     endTime: formatClock(nowMilliseconds + remainingMilliseconds),
-    expectedTotal: formatDuration(completedTaskMilliseconds + currentActiveMilliseconds + remainingActiveMilliseconds)
+    expectedTotal: formatDuration(elapsedMilliseconds + remainingMilliseconds)
   };
 }
 
@@ -259,7 +257,12 @@ export function speedStats(
     nowMilliseconds,
     currentTaskStartedAtMilliseconds
   ).reduce((totalMilliseconds, durationMilliseconds) => totalMilliseconds + durationMilliseconds, 0);
-  const elapsedMilliseconds = completedTaskMilliseconds + activeTaskMilliseconds;
+  const parallelTasks = normalizeParallelTasks(Number(run.config?.parallelTasks ?? 1));
+  const elapsedMilliseconds = parallelAdjustedDurationMilliseconds(
+    completedTaskMilliseconds + activeTaskMilliseconds,
+    parallelTasks,
+    runTotal(run)
+  );
   const averageTaskMilliseconds = averageTaskDurationMilliseconds(run);
   return {
     averageTask: averageTaskMilliseconds ? formatMs(averageTaskMilliseconds) : "n/a",
@@ -272,6 +275,15 @@ function completedActiveDurationMilliseconds(run: BenchRun) {
     (totalMilliseconds, result) => totalMilliseconds + resultActiveDurationMilliseconds(result),
     0
   );
+}
+
+function parallelAdjustedDurationMilliseconds(
+  durationMilliseconds: number,
+  parallelTasks: number,
+  totalTasks: number
+) {
+  const workerCount = Math.min(parallelTasks, Math.max(1, totalTasks));
+  return durationMilliseconds / workerCount;
 }
 
 function averageTaskDurationMilliseconds(run: BenchRun) {
@@ -358,6 +370,10 @@ export function resultStatus(result: BenchResult): CompletedResultStatus {
   return "fail";
 }
 
+export function resultHasDetectedLoop(result: BenchResult) {
+  return Boolean(result.loopDetection || result.looping);
+}
+
 export function failureStats(results: BenchResult[] = []) {
   return results.reduce(
     (stats, result) => {
@@ -365,7 +381,7 @@ export function failureStats(results: BenchResult[] = []) {
       if (status === "fail") stats.failedAssertions += 1;
       if (status === "partial") stats.partial += 1;
       if (status === "error") stats.errors += 1;
-      if (status === "loop") stats.looping += 1;
+      if (resultHasDetectedLoop(result)) stats.looping += 1;
       return stats;
     },
     { failedAssertions: 0, partial: 0, errors: 0, looping: 0 }
@@ -383,7 +399,7 @@ export function parseJsonObject(value: string) {
 
 export function resultNumbers(run: BenchRun | null, status: CompletedResultStatus) {
   return (run?.results ?? [])
-    .filter((result) => resultStatus(result) === status)
+    .filter((result) => status === "loop" ? resultHasDetectedLoop(result) : resultStatus(result) === status)
     .map((result) => result.index)
     .filter((index, position, indices) => indices.indexOf(index) === position)
     .sort((a, b) => a - b)
