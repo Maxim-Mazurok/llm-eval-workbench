@@ -811,6 +811,64 @@ describe("runtime server", () => {
     expect(thirdDetail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
   }, 15_000);
 
+  it("starts exactly one run from a burst of simultaneous creates", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([makeHangingModelHandler(hangingResponses), goodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await Promise.all([
+      createRun(apiUrl, model.baseUrl, { testNumbers: "0" }),
+      createRun(apiUrl, model.baseUrl, { testNumbers: "1" }),
+      createRun(apiUrl, model.baseUrl, { testNumbers: "2" })
+    ]);
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+
+    // However the burst interleaved, exactly one run occupies the slot and
+    // the other two wait with distinct positions.
+    const listed = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
+    const states = created.map((run) => listed.runs.find((candidate) => candidate.id === run.id));
+    const running = states.filter((run) => run.status === "running" || (run.status === "queued" && !run.queuePosition));
+    const waiting = states.filter((run) => run.status === "queued" && run.queuePosition);
+    expect(running).toHaveLength(1);
+    expect(waiting.map((run) => run.queuePosition).sort()).toEqual([1, 2]);
+    expect(model.requests).toHaveLength(1);
+
+    await fetch(`${apiUrl}/api/runs/${running[0].id}/cancel`, { method: "POST" });
+    for (const run of waiting) {
+      const detail = await waitForStatus(apiUrl, run.id, ["completed"]);
+      expect(detail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
+    }
+  }, 15_000);
+
+  it("queues a new run behind a resumed one", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No model loaded." } }));
+      },
+      makeHangingModelHandler(hangingResponses),
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const stalled = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await waitForStatus(apiUrl, stalled.id, ["completed"]);
+    await fetch(`${apiUrl}/api/runs/${stalled.id}/resume`, { method: "POST" });
+    // The resumed run's retried task hangs, so the resume occupies the slot.
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+
+    const queued = await createRun(apiUrl, model.baseUrl, { testNumbers: "1" });
+    expect(queued).toMatchObject({ status: "queued", queuePosition: 1 });
+    expect(model.requests).toHaveLength(2);
+
+    await fetch(`${apiUrl}/api/runs/${stalled.id}/cancel`, { method: "POST" });
+    const detail = await waitForStatus(apiUrl, queued.id, ["completed"]);
+    expect(detail).toMatchObject({ completed: 1, passed: 1, queuePosition: null });
+  }, 15_000);
+
   it("releases the execution slot when the active run is deleted", async () => {
     const rootDir = await makeRootDir();
     const hangingResponses = [];
