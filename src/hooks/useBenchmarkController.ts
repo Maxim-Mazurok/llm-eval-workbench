@@ -117,6 +117,19 @@ export function useBenchmarkController() {
     : true;
   const queueActive = useMemo(() => anyRunLive(runs), [runs]);
 
+  // A backend that predates the run queue starts every POSTed run
+  // immediately and its summaries carry no queue fields. When the UI promised
+  // "Add to queue" but the server can't queue, silence would look exactly like
+  // a broken queue — say what actually happened and how to fix it.
+  function warnIfBackendCannotQueue(runSummary: Record<string, unknown>) {
+    if (!queueActive || "queuePosition" in runSummary) return;
+    setError(
+      "The benchmark server is running an older version without run queueing, "
+      + "so this run started immediately instead of waiting. Restart the "
+      + "benchmark server (npm run dev:bench) once the current run finishes."
+    );
+  }
+
   const tokensByAttempt = useMemo(() => deriveTokensByAttempt(tokens), [tokens]);
 
   const promptInfoByAttempt = useMemo(
@@ -338,6 +351,7 @@ export function useBenchmarkController() {
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to start run");
+      warnIfBackendCannotQueue(json);
       setRuns((previous) => updateRunInPlace(previous, json));
       navigateTo({ view: "run", id: json.id });
       setTokens([]);
@@ -399,6 +413,7 @@ export function useBenchmarkController() {
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to resume run");
+      warnIfBackendCannotQueue(json);
       // A run that already notified once (stopped, or removed from the queue)
       // must notify again when this fresh attempt reaches a terminal state.
       notifiedRunsRef.current.delete(json.id);

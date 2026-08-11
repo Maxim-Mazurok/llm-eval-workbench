@@ -1580,6 +1580,46 @@ describe("App notifications", () => {
     expect(badge).toHaveTextContent("1");
     expect(screen.getByText(/queued · 0\/2/)).toBeInTheDocument();
     expect(window.location.pathname).toBe("/run/run-new");
+    // The backend answered with queue fields, so no version warning appears.
+    expect(screen.queryByText(/older version without run queueing/)).not.toBeInTheDocument();
+  });
+
+  it("warns when the benchmark server predates the run queue", async () => {
+    const runningRun = baseRun({
+      id: "run-live",
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    // An old server starts the run immediately and its summaries carry no
+    // queuePosition/queuedAt keys at all.
+    const startedImmediately = baseRun({ id: "run-new", status: "running", model: "skewed-model" });
+    let created = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs") && init?.method === "POST") {
+        created = true;
+        return jsonResponse(startedImmediately, 201);
+      }
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({ runs: created ? [startedImmediately, runningRun] : [runningRun] });
+      }
+      if (url.endsWith("/api/runs/run-new")) {
+        return jsonResponse({ ...startedImmediately, events: [] });
+      }
+      return jsonResponse({ ...runningRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const addToQueueButton = await screen.findByRole("button", { name: /add to queue/i });
+    await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "skewed-model");
+    await userEvent.click(addToQueueButton);
+
+    expect(await screen.findByText(/older version without run queueing/)).toBeInTheDocument();
+    expect(screen.getByText(/Restart the benchmark server/)).toBeInTheDocument();
   });
 
   it("selects a run from a /run/:id deep link", async () => {
