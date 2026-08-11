@@ -58,4 +58,65 @@ describe("RunStrip", () => {
     expect(screen.queryByText("Qwen Reasoning")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Gemma ReasoningBBEH Mini/ })).toBeInTheDocument();
   });
+
+  it("updates run progress and score when a live run advances", () => {
+    const liveRun = {
+      ...benchmarkRun("live-human", "humaneval", "Live Coder"),
+      status: "running",
+      total: 4,
+      completed: 1,
+      passed: 1,
+      liveScore: 1
+    };
+    const properties = {
+      selectedRunId: liveRun.id,
+      onDelete: vi.fn(),
+      onNavigate: vi.fn(),
+      onRemoveFromQueue: vi.fn(),
+      onSelectNew: vi.fn()
+    };
+    const { rerender } = render(<RunStrip {...properties} runs={[liveRun]} />);
+
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText("1/4")).toBeInTheDocument();
+    expect(screen.getByText("score 100%")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Progress: 1 of 4 tasks, 100% score" })).toBeInTheDocument();
+
+    const advancedRun = {
+      ...liveRun,
+      completed: 3,
+      passed: 2,
+      failed: 1,
+      liveScore: 2 / 3
+    };
+    rerender(<RunStrip {...properties} runs={[advancedRun]} />);
+
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText("3/4")).toBeInTheDocument();
+    expect(screen.getByText("score 66.7%")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Progress: 3 of 4 tasks, 66.7% score" })).toBeInTheDocument();
+  });
+
+  it("shows score and a checked indicator for completed graded benchmarks", () => {
+    const gradedRun = {
+      ...benchmarkRun("graded", "person-gender-name", "Graded Model"),
+      meanScore: 0.42,
+      liveScore: 0.9
+    };
+
+    render(
+      <RunStrip
+        runs={[gradedRun]}
+        selectedRunId={gradedRun.id}
+        onDelete={vi.fn()}
+        onNavigate={vi.fn()}
+        onRemoveFromQueue={vi.fn()}
+        onSelectNew={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("score 42%")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Progress: 1 of 1 tasks, 42% score" })).toBeInTheDocument();
+    expect(document.querySelector(".status-dot.completed svg")).toBeInTheDocument();
+  });
 });

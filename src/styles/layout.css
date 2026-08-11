@@ -79,7 +79,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 3px 9px;
   width: 100%;
-  min-height: 68px;
+  min-height: 94px;
   padding: 11px 42px 11px 12px;
   text-align: left;
   background: transparent;
@@ -88,7 +88,6 @@
 
 .run-tab.active {
   background: #f4f8ef;
-  box-shadow: inset 0 -3px 0 var(--green);
 }
 
 .run-tab-main strong,
@@ -107,6 +106,60 @@
   color: var(--muted);
   font-size: 11px;
   font-weight: 750;
+}
+
+.run-tab-benchmark {
+  color: var(--ink) !important;
+}
+
+.run-tab-metrics {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.run-tab-metrics span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-tab-metrics .run-tab-count {
+  flex: none;
+  overflow: visible;
+}
+
+.run-tab-metrics b {
+  flex: none;
+  color: var(--green);
+}
+
+.run-tab-progress {
+  display: flex;
+  grid-column: 2;
+  width: 100%;
+  height: 4px;
+  margin-top: 3px;
+  overflow: hidden;
+  background: #e1e5df;
+  border-radius: 999px;
+}
+
+.run-tab-progress > span {
+  height: 100%;
+}
+
+.run-tab-progress-failed {
+  background: var(--brick);
+}
+
+.run-tab-progress-passed {
+  background: var(--green);
+}
+
+.run-tab-progress-remaining {
+  background: #e1e5df;
 }
 
 .run-delete {
@@ -244,6 +297,17 @@
 .status-dot.live {
   background: var(--brick);
   box-shadow: 0 0 0 4px rgba(185, 70, 38, 0.13);
+}
+
+.status-dot.completed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-top: 2px;
+  color: #ffffff;
+  background: var(--green);
 }
 
 .bench-status {
