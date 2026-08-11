@@ -1,6 +1,13 @@
 import { packBenchmarkOptions } from "./benchmarkPacks";
 
-export function benchmarkApiOrigin(pageUrl = window.location.href) {
+export function benchmarkApiOrigin(
+  pageUrl = window.location.href,
+  configuredApiUrl: string | undefined = import.meta.env?.VITE_BENCH_API_URL
+) {
+  // An explicitly configured API URL wins (Playwright starts the benchmark
+  // server on an ephemeral port); otherwise the server is assumed to live on
+  // the page's host at its default port.
+  if (configuredApiUrl) return new URL(configuredApiUrl).origin;
   const benchmarkApiUrl = new URL(pageUrl);
   benchmarkApiUrl.port = "8787";
   return benchmarkApiUrl.origin;
