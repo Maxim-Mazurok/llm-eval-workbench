@@ -19,8 +19,7 @@ import {
  */
 export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {}) {
   const [benchmark, setBenchmarkState] = useState<BenchmarkId>(DEFAULT_FORM_VALUES.benchmark);
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_FORM_VALUES.baseUrl);
-  const [apiKey, setApiKey] = useState(DEFAULT_FORM_VALUES.apiKey);
+  const [providerId, setProviderId] = useState(DEFAULT_FORM_VALUES.providerId);
   const [model, setModel] = useState(DEFAULT_FORM_VALUES.model);
   const [maxOutputTokens, setMaxOutputTokens] = useState(DEFAULT_FORM_VALUES.maxOutputTokens);
   const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_FORM_VALUES.thinkingEnabled);
@@ -55,8 +54,6 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
 
   function resetRunConfig() {
     setBenchmarkState(DEFAULT_FORM_VALUES.benchmark);
-    setBaseUrl(DEFAULT_FORM_VALUES.baseUrl);
-    setApiKey(DEFAULT_FORM_VALUES.apiKey);
     setModel(DEFAULT_FORM_VALUES.model);
     setMaxOutputTokens(DEFAULT_FORM_VALUES.maxOutputTokens);
     setThinkingEnabled(DEFAULT_FORM_VALUES.thinkingEnabled);
@@ -79,11 +76,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     const config = run.config ?? {};
     const option = benchmarkOption(config.benchmark ?? run.benchmark);
     setBenchmarkState(option.id);
-    setBaseUrl(config.baseUrl ?? run.baseUrl ?? "");
-    // Remote runs only ever get a redacted "***" placeholder back from the
-    // server, so re-typing the key is required; local runs persist the real
-    // key and can restore it directly.
-    setApiKey(config.apiKey && config.apiKey !== "***" ? String(config.apiKey) : DEFAULT_FORM_VALUES.apiKey);
+    if (config.providerId ?? run.providerId) setProviderId(String(config.providerId ?? run.providerId));
     setModel(config.model ?? run.model ?? "");
     setMaxOutputTokens(Number(config.maxOutputTokens ?? DEFAULT_FORM_VALUES.maxOutputTokens));
     setThinkingEnabled(config.thinkingEnabled ?? DEFAULT_FORM_VALUES.thinkingEnabled);
@@ -102,9 +95,9 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   }
 
   return {
-    benchmark, baseUrl, apiKey, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
+    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, sampleLimit, startIndex, testNumbers,
-    systemPrompt, promptTemplate, extraBody, setBenchmark, setBaseUrl, setApiKey, setModel,
+    systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
     setMaxOutputTokens, setThinkingEnabled, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
     setAdaptiveRepetitionPenalty(value: boolean) {
       setAdaptiveRepetitionPenaltyState(value);

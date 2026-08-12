@@ -18,8 +18,8 @@ evaluations — plugs in as an optional **benchmark pack** installed under
 `packs/`, with no changes to this repository. See
 [`packs/README.md`](packs/README.md).
 
-The core workflow is simple: pick a benchmark, point the app at a model
-endpoint, edit the system prompt or user prompt template, start a subset or
+The core workflow is simple: save a model provider, pick it from the provider
+combobox, choose a benchmark, edit the system prompt or user prompt template, start a subset or
 full run, and watch live pass/fail results stream in as each task completes.
 Each run uses exactly one benchmark.
 
@@ -28,6 +28,8 @@ Each run uses exactly one benchmark.
 ## Features
 
 - React/Vite GUI for configuring benchmark runs.
+- Saved provider profiles with API keys stored in the operating system's
+  credential vault rather than browser storage or benchmark artifacts.
 - Benchmark selector: HumanEval (code), corrected/official-data BBEH Mini/Full
   (reasoning), and any benchmarks contributed by installed packs, with
   per-benchmark default prompts and answer extraction.
@@ -51,6 +53,8 @@ Each run uses exactly one benchmark.
   active or historical runs.
 - Incomplete stopped, cancelled, interrupted, or errored runs can be resumed
   from their existing saved results.
+- Independent per-provider run queues, so remote providers can benchmark
+  concurrently while every loopback endpoint shares a protective local lock.
 
 ## Quick Start
 
@@ -139,9 +143,45 @@ this hole with oMLX's admin API (`<origin>/admin/api/models`,
 When the admin API is unreachable (non-oMLX endpoints), capability is
 unknown and the run is allowed — verify the model can see images yourself.
 
-The Model field is a combobox: suggestions come from the endpoint's
-`/v1/models` via the benchmark server's `/api/models` proxy, refreshed as the
-Base URL changes; free text still works when the endpoint is unreachable.
+The Model field is a combobox: suggestions come from the selected provider's
+`/v1/models` via the benchmark server's `/api/models` proxy. Opening the
+combobox refreshes the list; free text still works when the endpoint is unreachable.
+
+## Providers and API keys
+
+Use `Manage` beside the Provider field to add, edit, or delete connection
+profiles. A profile has a display name, an OpenAI-compatible base URL, and an
+optional API key. Run forms and model lookups send only the selected provider
+ID to the local benchmark server; the server resolves the URL and key.
+
+Provider metadata is written to `.config/providers.json` with owner-only file
+permissions and is ignored by git. API keys are stored separately:
+
+- macOS: Login Keychain via the built-in `security` command.
+- Windows: Credential Manager via the maintained optional `@github/keytar`
+  package.
+- Linux: Secret Service via `secret-tool` (`libsecret-tools` on many
+  distributions). If a secure keyring is unavailable, saving an API key fails
+  explicitly; the app does not fall back to plaintext secret files.
+
+The first launch creates a keyless `Local model server` profile for
+`http://localhost:8000/v1`. Edit or delete it like any other provider. Leaving
+the API-key field blank while editing keeps an existing saved key; use `Remove
+saved API key` to clear it.
+
+To preview mapping older run artifacts to saved providers by exact base URL:
+
+```bash
+npm run migrate:providers
+```
+
+Use `--apply` to write the mappings. If a provider changed endpoints, add an
+explicit alias in the form `--alias=<old-base-url>=<provider-id>`. The migration
+also treats an explicit alias as authoritative, so it can correct an earlier
+assignment after a more specific provider is saved. The migration
+backs up changed `run.json` files beneath
+`benchmark-runs/.provider-migration-backups/`; both migrated files and backups
+redact any legacy plaintext key.
 
 ### Graded scoring
 
@@ -228,10 +268,16 @@ Use `Stop selected` to cancel an active run. If the run is incomplete, select it
 again and use `Resume` to continue only the attempts that do not already have
 saved results.
 
-Only one run executes at a time. While a run is in progress, `Start run` becomes
-`Add to queue` and `Resume` becomes `Queue resume`: the new or resumed run waits
-in a first-in-first-out queue and starts automatically when the active run
-finishes, errors, or is stopped. Each queued run's tab shows its place in line
+Each provider has its own first-in-first-out queue. Azure, OpenAI, and other
+remote provider profiles can therefore run at the same time, while runs for the
+same provider remain serialized. All loopback endpoints (`localhost`,
+`127.0.0.0/8`, `::1`, and `0.0.0.0`) deliberately share one local queue even
+when their ports or saved provider profiles differ; this prevents multiple
+local model servers from exhausting the same RAM or accelerator.
+
+When the selected provider's lane is busy, `Start run` becomes `Add to queue`
+and `Resume` becomes `Queue resume`. The run starts automatically when that
+lane becomes free. Each queued run's tab shows its place in its provider line
 as a badge; hovering the badge turns the number into an `X` that removes the run
 from the queue (on touch screens the `X` appears next to the number on the
 selected tab). A run removed from the queue is kept as `cancelled`, so it can be
@@ -337,9 +383,10 @@ Do not commit benchmark outputs unless you have reviewed them. They may contain
 API endpoint details, model identifiers, prompt text, model completions, and
 reasoning/thinking traces.
 
-The API key entered in the UI is sent to the local benchmark server for outbound
-requests. Saved run config stores `"***"` when a key was provided and `""` when
-it was empty; the plain text key is not written to `run.json` or `results.json`.
+API keys pass through the local benchmark server only when a provider is saved,
+then live in the OS credential vault. Saved runs reference the provider ID and
+store `"***"` when a key was present; plaintext keys are never returned by run
+APIs or written to `run.json`, `results.json`, browser storage, or queue state.
 
 ## Build
 

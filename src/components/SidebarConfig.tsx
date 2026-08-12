@@ -1,7 +1,6 @@
 import {
   CircleStop,
   FileText,
-  KeyRound,
   ListPlus,
   PanelLeftClose,
   Play,
@@ -16,19 +15,25 @@ import {
   type BenchRun
 } from "../domain/benchmark";
 import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive } from "../domain/runs";
-import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
+import type { ProviderConfig } from "../domain/providers";
+import { BenchmarkCombobox, ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
 export type SidebarConfigProps = {
   benchmark: BenchmarkId;
-  baseUrl: string;
-  apiKey: string;
+  providerId: string;
+  providers: ProviderConfig[];
+  providersLoading: boolean;
+  selectedProvider: ProviderConfig | null;
   model: string;
   /** Model ids from the endpoint's /v1/models, for the combobox suggestions. */
   availableModels: string[];
+  /** True while the selected provider's model list is loading. */
+  availableModelsLoading: boolean;
   /** id → oMLX model_type ("vlm" = vision-capable); empty when unknown. */
   modelTypes: Record<string, string>;
   /** Refetches the model list; called whenever the combobox opens. */
   onRefreshModels: () => void;
+  onManageProviders: () => void;
   maxOutputTokens: number;
   thinkingEnabled: boolean;
   thinkingBudget: number;
@@ -44,7 +49,7 @@ export type SidebarConfigProps = {
   promptTemplate: string;
   extraBody: string;
   selectedRun: BenchRun | null;
-  /** True while any run is live, so start/resume enqueue instead of starting. */
+  /** True while this provider's lane is live; local providers share one lane. */
   queueActive: boolean;
   error: string | null;
   onCollapse: () => void;
@@ -52,8 +57,7 @@ export type SidebarConfigProps = {
   onCancelRun: () => void;
   onResumeRun: () => void;
   setBenchmark: (value: BenchmarkId) => void;
-  setBaseUrl: (value: string) => void;
-  setApiKey: (value: string) => void;
+  setProviderId: (value: string) => void;
   setModel: (value: string) => void;
   setMaxOutputTokens: (value: number) => void;
   setThinkingEnabled: (value: boolean) => void;
@@ -110,18 +114,34 @@ export function SidebarConfig(props: SidebarConfigProps) {
           }}
         />
       </label>
-      <label className="field">
-        <span><Server size={14} /> Base URL</span>
-        <input value={props.baseUrl} onChange={(event) => props.setBaseUrl(event.target.value)} placeholder="https://host/v1" />
-      </label>
-      <label className="field">
-        <span><KeyRound size={14} /> API key</span>
-        <input value={props.apiKey} onChange={(event) => props.setApiKey(event.target.value)} type="password" placeholder="optional" />
-      </label>
+      <div className="provider-field-group">
+        <label className="field">
+          <span><Server size={14} /> Provider</span>
+          <ProviderCombobox
+            providers={props.providers}
+            value={props.providerId}
+            onChange={props.setProviderId}
+          />
+        </label>
+        <button className="manage-providers-button" type="button" onClick={props.onManageProviders}>
+          <Settings2 size={15} /> Manage
+        </button>
+      </div>
+      {props.selectedProvider ? (
+        <p className="provider-selection-meta">
+          <span>{props.selectedProvider.baseUrl}</span>
+          <em>{props.selectedProvider.hasApiKey ? "Key secured" : "No key"}</em>
+        </p>
+      ) : !props.providersLoading ? (
+        <button className="provider-empty-action" type="button" onClick={props.onManageProviders}>
+          Add a provider before starting a run
+        </button>
+      ) : null}
       <label className="field">
         <span>Model</span>
         <ModelCombobox
           models={props.availableModels}
+          loading={props.availableModelsLoading}
           placeholder="provider/model-name"
           tags={Object.fromEntries(
             props.availableModels.map((modelId) => [
@@ -222,7 +242,7 @@ export function SidebarConfig(props: SidebarConfigProps) {
           title={props.queueActive ? "A run is in progress — this run will wait in the queue" : undefined}
           type="button"
           onClick={props.onStartRun}
-          disabled={!props.model.trim()}
+          disabled={!props.providerId || !props.model.trim()}
         >
           {props.queueActive ? <><ListPlus size={17} /> Add to queue</> : <><Play size={17} /> Start run</>}
         </button>

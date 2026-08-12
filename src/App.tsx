@@ -1,18 +1,23 @@
 import { PanelLeftOpen } from "lucide-react";
+import { useState } from "react";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { PassVariabilityChart } from "./components/PassVariabilityChart";
 import { RunStrip } from "./components/RunStrip";
 import { SidebarConfig } from "./components/SidebarConfig";
+import { ProviderManager } from "./components/ProviderManager";
 import { StatusSummary } from "./components/StatusSummary";
 import { TaskResults } from "./components/TaskResults";
 import { useAvailableModels } from "./hooks/useAvailableModels";
 import { useBenchmarkController } from "./hooks/useBenchmarkController";
 
 export default function App() {
+  const [providerManagerOpen, setProviderManagerOpen] = useState(false);
   const {
     benchmark,
-    baseUrl,
-    apiKey,
+    providerId,
+    providers,
+    providersLoading,
+    selectedProvider,
     model,
     maxOutputTokens,
     thinkingEnabled,
@@ -49,8 +54,7 @@ export default function App() {
     commentSignalThreshold,
     currentTimeMilliseconds,
     setBenchmark,
-    setBaseUrl,
-    setApiKey,
+    setProviderId,
     setModel,
     setMaxOutputTokens,
     setThinkingEnabled,
@@ -80,12 +84,15 @@ export default function App() {
     removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
+    saveProvider,
+    deleteProvider,
   } = useBenchmarkController();
   const {
     models: availableModels,
     modelTypes: availableModelTypes,
+    loading: availableModelsLoading,
     refresh: refreshAvailableModels
-  } = useAvailableModels(baseUrl, apiKey);
+  } = useAvailableModels(providerId);
 
   return (
     <main className={sidebarCollapsed ? "bench-shell sidebar-collapsed" : "bench-shell"}>
@@ -102,12 +109,16 @@ export default function App() {
       ) : (
         <SidebarConfig
           benchmark={benchmark}
-          baseUrl={baseUrl}
-          apiKey={apiKey}
+          providerId={providerId}
+          providers={providers}
+          providersLoading={providersLoading}
+          selectedProvider={selectedProvider}
           model={model}
           availableModels={availableModels}
+          availableModelsLoading={availableModelsLoading}
           modelTypes={availableModelTypes}
           onRefreshModels={refreshAvailableModels}
+          onManageProviders={() => setProviderManagerOpen(true)}
           maxOutputTokens={maxOutputTokens}
           thinkingEnabled={thinkingEnabled}
           thinkingBudget={thinkingBudget}
@@ -130,8 +141,7 @@ export default function App() {
           onCancelRun={cancelRun}
           onResumeRun={resumeRun}
           setBenchmark={setBenchmark}
-          setBaseUrl={setBaseUrl}
-          setApiKey={setApiKey}
+          setProviderId={setProviderId}
           setModel={setModel}
           setMaxOutputTokens={setMaxOutputTokens}
           setThinkingEnabled={setThinkingEnabled}
@@ -191,6 +201,15 @@ export default function App() {
           setSelectedPassByTask={setSelectedPassByTask}
         />
       </section>
+      <ProviderManager
+        open={providerManagerOpen}
+        providers={providers}
+        selectedProviderId={providerId}
+        onClose={() => setProviderManagerOpen(false)}
+        onSelect={setProviderId}
+        onSave={saveProvider}
+        onDelete={deleteProvider}
+      />
     </main>
   );
 }

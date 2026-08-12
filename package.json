@@ -27,6 +27,7 @@
     "dev:bench": "node scripts/eval-server.mjs",
     "migrate:output-extraction": "node scripts/update-saved-results.mjs --apply",
     "migrate:loop-detection": "node scripts/migrate-loop-detection.mjs",
+    "migrate:providers": "node scripts/migrate-provider-configs.mjs",
     "reanalyze:output-extraction": "node scripts/reprocess-saved-results.mjs",
     "test": "vitest run",
     "test:unit": "vitest run src/notifications.test.ts",
@@ -53,5 +54,8 @@
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
+  },
+  "optionalDependencies": {
+    "@github/keytar": "^7.10.6"
   }
 }

@@ -13,9 +13,17 @@ const MODELS = [
   "gpt-oss-20b-MXFP4-Q8"
 ];
 
-function Harness({ models = MODELS, onOpen = () => {} }: { models?: string[]; onOpen?: () => void }) {
+function Harness({
+  models = MODELS,
+  loading = false,
+  onOpen = () => {}
+}: {
+  models?: string[];
+  loading?: boolean;
+  onOpen?: () => void;
+}) {
   const [value, setValue] = useState("");
-  return <ModelCombobox models={models} value={value} onChange={setValue} onOpen={onOpen} />;
+  return <ModelCombobox models={models} loading={loading} value={value} onChange={setValue} onOpen={onOpen} />;
 }
 
 describe("ModelCombobox", () => {
@@ -53,5 +61,12 @@ describe("ModelCombobox", () => {
     await userEvent.type(input, "my-custom-model");
     expect(input).toHaveValue("my-custom-model");
     expect(screen.getByText(/endpoint unreachable/i)).toBeInTheDocument();
+  });
+
+  it("shows loading instead of stale suggestions while a provider changes", async () => {
+    render(<Harness loading />);
+    await userEvent.click(screen.getByRole("combobox"));
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.getByText("Loading models…")).toBeInTheDocument();
   });
 });

@@ -7,6 +7,7 @@ type RunFixture = {
   id: string;
   status: string;
   model: string;
+  baseUrl: string;
   createdAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
@@ -33,6 +34,7 @@ const baseRun = (overrides: Partial<RunFixture> = {}): RunFixture => ({
   id: "run-1",
   status: "queued",
   model: "demo-model",
+  baseUrl: "http://localhost:8000/v1",
   createdAt: "2026-06-16T00:00:00.000Z",
   startedAt: null,
   finishedAt: null,
@@ -236,19 +238,17 @@ describe("App notifications", () => {
 
     const modelInput = await screen.findByPlaceholderText("provider/model-name");
     expect(modelInput).toHaveValue("");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://localhost:8000/v1");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server"));
 
     await userEvent.click(screen.getByRole("button", { name: /completed.*saved-model|saved-model.*completed/i }));
     await waitFor(() => expect(modelInput).toHaveValue("saved-model"));
     expect(window.location.pathname).toBe("/run/run-1");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://saved.example/v1");
-    // A real api key persisted for a local run's config loads back into the form.
-    expect(screen.getByPlaceholderText("optional")).toHaveValue("sk-live-secret");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server");
 
     await userEvent.click(screen.getByRole("button", { name: /new bench/i }));
     expect(window.location.pathname).toBe("/new");
     expect(modelInput).toHaveValue("");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://localhost:8000/v1");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server");
     const extraBodyField = screen.getByText("Extra request body").closest("label")?.querySelector("textarea");
     expect(extraBodyField).toHaveValue("{\n  \"top_p\": 1\n}");
   });
@@ -663,8 +663,8 @@ describe("App notifications", () => {
     });
     expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
       benchmark: "humaneval",
-      baseUrl: "",
-      apiKey: "",
+      providerId: "local-default",
+      baseUrl: "http://localhost:8000/v1",
       model: "demo-model",
       maxOutputTokens: 2048,
       timeoutSeconds: 15,
@@ -723,8 +723,8 @@ describe("App notifications", () => {
     const resumeRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/runs/run-1/resume"));
     expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
       benchmark: "humaneval",
-      baseUrl: "",
-      apiKey: "",
+      providerId: "local-default",
+      baseUrl: "http://localhost:8000/v1",
       model: "demo-model",
       maxOutputTokens: 2048,
       timeoutSeconds: 15,
@@ -1270,6 +1270,9 @@ describe("App notifications", () => {
     let detailFetches = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/providers")) {
+        return jsonResponse({ providers: [{ id: "local-default", name: "Local model server", baseUrl: "http://localhost:8000/v1", hasApiKey: false }] });
+      }
       if (url.endsWith("/api/benchmarks")) {
         return jsonResponse({ benchmarks: [] });
       }
