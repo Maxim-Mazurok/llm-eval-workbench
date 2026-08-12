@@ -1,7 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BENCHMARK_OPTIONS, type BenchmarkId } from "../domain/benchmark";
-import { isLocalProviderUrl, type ProviderConfig } from "../domain/providers";
+import { isLocalProviderUrl, providerKindLabel, type ProviderConfig } from "../domain/providers";
 
 type ComboboxOption = {
   value: string;
@@ -242,9 +242,8 @@ export function ProviderCombobox({
       options={providers.map((provider) => ({
         value: provider.id,
         label: provider.name,
-        tag: isLocalProviderUrl(provider.baseUrl)
-          ? "local"
-          : new URL(provider.baseUrl).hostname
+        tag: providerKindLabel(provider.baseUrl)
+          ?? (isLocalProviderUrl(provider.baseUrl) ? "local" : new URL(provider.baseUrl).hostname)
       }))}
       placeholder="Choose a saved provider"
       value={value}
