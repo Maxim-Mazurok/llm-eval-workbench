@@ -71,7 +71,7 @@ export default function App() {
     setSelectedPassByTask,
     setCommentSignalThreshold,
     toggleNotificationsForRun,
-    navigateTo,
+    selectRun,
     selectNewBench,
     startRun,
     cancelRun,
@@ -155,7 +155,7 @@ export default function App() {
           runs={runs}
           selectedRunId={selectedRunId}
           onSelectNew={selectNewBench}
-          onNavigate={navigateTo}
+          onNavigate={selectRun}
           onDelete={deleteRun}
           onRemoveFromQueue={removeRunFromQueue}
         />

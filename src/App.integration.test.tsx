@@ -554,6 +554,36 @@ describe("App notifications", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
+  it("clears a stale error when switching to a run", async () => {
+    const existingRun = baseRun({
+      id: "existing-run",
+      status: "completed",
+      model: "existing-model",
+      completed: 2,
+      passed: 2,
+      liveScore: 1,
+      finalScore: 1
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [existingRun] });
+      return jsonResponse({ ...existingRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "configured-model");
+    fireEvent.change(screen.getByLabelText("Extra request body"), { target: { value: "[]" } });
+    await userEvent.click(screen.getByRole("button", { name: /start run/i }));
+    await screen.findByText("Extra request body must be a JSON object.");
+
+    await userEvent.click(await screen.findByRole("button", { name: /^existing-model/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Extra request body must be a JSON object.")).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps start disabled until a model is entered", async () => {
     vi.stubGlobal("fetch", vi.fn(() => jsonResponse({ runs: [] })));
 
@@ -626,14 +656,25 @@ describe("App notifications", () => {
     await waitFor(() => expect(resumeButton).toBeEnabled());
     await userEvent.click(resumeButton);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/api/runs/run-1/resume",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey: "" })
-      }
-    );
+    const resumeRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/runs/run-1/resume"));
+    expect(resumeRequest?.[1]).toMatchObject({
+      method: "POST",
+      headers: { "content-type": "application/json" }
+    });
+    expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
+      benchmark: "humaneval",
+      baseUrl: "",
+      apiKey: "",
+      model: "demo-model",
+      maxOutputTokens: 2048,
+      timeoutSeconds: 15,
+      parallelTasks: 1,
+      passCount: 1,
+      sampleLimit: 0,
+      startIndex: 0,
+      testNumbers: "",
+      extraBody: {}
+    });
     await waitFor(() => expect(screen.queryByText(/old stale output/i)).not.toBeInTheDocument());
   });
 
@@ -679,14 +720,21 @@ describe("App notifications", () => {
     await waitFor(() => expect(resumeButton).toBeEnabled());
     await userEvent.click(resumeButton);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/api/runs/run-1/resume",
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey: "" })
-      }
-    );
+    const resumeRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/runs/run-1/resume"));
+    expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
+      benchmark: "humaneval",
+      baseUrl: "",
+      apiKey: "",
+      model: "demo-model",
+      maxOutputTokens: 2048,
+      timeoutSeconds: 15,
+      parallelTasks: 1,
+      passCount: 1,
+      sampleLimit: 0,
+      startIndex: 0,
+      testNumbers: "",
+      extraBody: {}
+    });
   });
 
   it("only shows the remaining metric for runs that are in progress", async () => {

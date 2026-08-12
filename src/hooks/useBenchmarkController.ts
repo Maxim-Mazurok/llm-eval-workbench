@@ -166,7 +166,10 @@ export function useBenchmarkController() {
     if (window.location.pathname !== canonicalPath) {
       window.history.replaceState(null, "", canonicalPath);
     }
-    const handlePopState = () => setRoute(readBenchRoute());
+    const handlePopState = () => {
+      setError(null);
+      setRoute(readBenchRoute());
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -281,7 +284,13 @@ export function useBenchmarkController() {
   }, []);
 
   function selectNewBench() {
+    setError(null);
     navigateTo({ view: "new" });
+  }
+
+  function selectRun(routeTarget: BenchRoute) {
+    setError(null);
+    navigateTo(routeTarget);
   }
 
   useEffect(() => {
@@ -322,32 +331,37 @@ export function useBenchmarkController() {
       .catch((runError) => setError(runError instanceof Error ? runError.message : String(runError)));
   }, [selectedRunId]);
 
+  function currentRunConfig() {
+    return {
+      benchmark,
+      baseUrl,
+      apiKey,
+      model,
+      maxOutputTokens,
+      thinkingEnabled,
+      thinkingBudget,
+      timeoutSeconds,
+      parallelTasks: normalizeParallelTasks(parallelTasks),
+      passCount: normalizePassCount(passCount),
+      adaptiveRepetitionPenalty,
+      repetitionPenalty,
+      sampleLimit,
+      startIndex,
+      testNumbers,
+      systemPrompt,
+      promptTemplate,
+      temperature: 0,
+      extraBody: parseJsonObject(extraBody)
+    };
+  }
+
   async function startRun() {
     setError(null);
     try {
       const response = await fetch(`${BENCH_API}/api/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          benchmark,
-          baseUrl,
-          apiKey,
-          model,
-          maxOutputTokens,
-          thinkingEnabled,
-          thinkingBudget,
-          timeoutSeconds,
-          parallelTasks: normalizeParallelTasks(parallelTasks),
-          passCount: normalizePassCount(passCount),
-          adaptiveRepetitionPenalty,
-          sampleLimit,
-          startIndex,
-          testNumbers,
-          systemPrompt,
-          promptTemplate,
-          temperature: 0,
-          extraBody: parseJsonObject(extraBody)
-        })
+        body: JSON.stringify(currentRunConfig())
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to start run");
@@ -404,12 +418,10 @@ export function useBenchmarkController() {
     if (!selectedRun || !runCanResume(selectedRun)) return;
     setError(null);
     try {
-      // The field is the source of truth: always send its current value so a
-      // key typed in after the run stalled on a 401 actually gets used.
       const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/resume`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ apiKey })
+        body: JSON.stringify(currentRunConfig())
       });
       const json = await response.json();
       if (!response.ok) throw new Error(json.error || "Failed to resume run");
@@ -525,7 +537,7 @@ export function useBenchmarkController() {
     setSelectedPassByTask,
     setCommentSignalThreshold,
     toggleNotificationsForRun,
-    navigateTo,
+    selectRun,
     selectNewBench,
     startRun,
     cancelRun,

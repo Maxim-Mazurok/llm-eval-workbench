@@ -244,7 +244,8 @@ export function runDirName(run) {
 export function normalizeBaseUrl(baseUrl) {
   const trimmed = String(baseUrl || "").trim().replace(/\/+$/, "");
   if (!trimmed) throw new Error("Base URL is required.");
-  if (trimmed.endsWith("/v1")) return trimmed;
+  const url = new URL(trimmed);
+  if (url.pathname && url.pathname !== "/") return trimmed;
   return `${trimmed}/v1`;
 }
 
