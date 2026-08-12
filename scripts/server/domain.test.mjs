@@ -82,6 +82,7 @@ describe("server domain helpers", () => {
   it("normalizes base URLs and run bounds", () => {
     expect(normalizeBaseUrl(" http://localhost:8000/v1/ ")).toBe("http://localhost:8000/v1");
     expect(normalizeBaseUrl("http://localhost:8000")).toBe("http://localhost:8000/v1");
+    expect(normalizeBaseUrl("https://gateway.vlm.run/v1/openai")).toBe("https://gateway.vlm.run/v1/openai");
     expect(() => normalizeBaseUrl("")).toThrow("Base URL is required");
     expect(normalizeParallelTasks(99)).toBe(64);
     expect(normalizeParallelTasks(0)).toBe(1);

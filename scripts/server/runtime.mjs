@@ -475,6 +475,7 @@ export function createRuntimeServer({
       stream: true,
       temperature: run.temperature,
       max_tokens: thinkingBudget + run.maxOutputTokens,
+      enable_thinking: run.thinkingEnabled,
       thinking_budget: thinkingBudget,
       chat_template_kwargs: { enable_thinking: run.thinkingEnabled },
       stream_options: { include_usage: true }
@@ -848,11 +849,47 @@ export function createRuntimeServer({
     }
   }
 
+  async function assertVlmRunModelSupportsThinking(baseUrl, modelId, thinkingEnabled, apiKey) {
+    if (!thinkingEnabled) return;
+    const endpointUrl = new URL(baseUrl);
+    if (endpointUrl.hostname !== "gateway.vlm.run") return;
+    try {
+      const modelDetailsUrl = new URL(`/v1/models/${encodeURIComponent(String(modelId || "").trim())}`, endpointUrl.origin);
+      const response = await fetchImplementation(modelDetailsUrl, {
+        signal: AbortSignal.timeout(3000),
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!Array.isArray(payload?.supported_parameters)) return;
+      const thinkingParameters = new Set([
+        "enable_thinking",
+        "reasoning_effort",
+        "thinking_budget",
+        "chat_template_kwargs"
+      ]);
+      if (payload.supported_parameters.some((parameter) => thinkingParameters.has(parameter))) return;
+      throw new Error(
+        `Model "${modelId}" on gateway.vlm.run does not support thinking. Its live model metadata lists `
+        + `only: ${payload.supported_parameters.join(", ") || "no request parameters"}. `
+        + "Turn off thinking or use an endpoint that supports enable_thinking."
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("does not support thinking")) throw error;
+    }
+  }
+
   async function createRun(config) {
     const baseUrl = normalizeBaseUrl(config.baseUrl);
     const benchmark = getBenchmark(config.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
     await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems, config.apiKey);
+    await assertVlmRunModelSupportsThinking(
+      baseUrl,
+      config.model,
+      config.thinkingEnabled !== false,
+      config.apiKey
+    );
     const selectedIndices = parseTestNumbers(config.testNumbers, allProblems.length, benchmark.taskIdPattern);
     const adaptiveRepetitionPenalty = Boolean(config.adaptiveRepetitionPenalty);
     const repetitionPenalty = Number(config.repetitionPenalty ?? 1);
@@ -946,6 +983,91 @@ export function createRuntimeServer({
     if (run.status === "running" || run.status === "queued") return false;
     if (run.status === "completed" && !runHasModelErrorResults(run)) return false;
     return run.completed < run.total || runHasModelErrorResults(run);
+  }
+
+  async function applyResumeConfig(run, config) {
+    const benchmark = getBenchmark(config.benchmark ?? run.benchmark);
+    const allProblems = await loadBenchmarkProblems(benchmark);
+    const baseUrl = normalizeBaseUrl(config.baseUrl ?? run.baseUrl);
+    const adaptiveRepetitionPenalty = config.adaptiveRepetitionPenalty === undefined
+      ? run.adaptiveRepetitionPenalty
+      : Boolean(config.adaptiveRepetitionPenalty);
+    const repetitionPenalty = Number(config.repetitionPenalty ?? run.repetitionPenalty ?? 1);
+    if (adaptiveRepetitionPenalty && (!Number.isFinite(repetitionPenalty) || repetitionPenalty <= 0)) {
+      throw new Error("Starting repetition penalty must be greater than zero.");
+    }
+    const parallelTasks = adaptiveRepetitionPenalty
+      ? 1
+      : normalizeParallelTasks(config.parallelTasks ?? run.parallelTasks);
+    const passCount = normalizePassCount(config.passCount ?? run.passCount);
+    const sampleLimit = normalizeTaskCount(config.sampleLimit ?? run.sampleLimit);
+    const startIndex = normalizeTaskCount(config.startIndex ?? run.startIndex);
+    const testNumbers = String(config.testNumbers ?? run.publicConfig?.testNumbers ?? "");
+    const selectedIndices = parseTestNumbers(testNumbers, allProblems.length, benchmark.taskIdPattern);
+    const effectiveSelectedIndices = selectedIndices.length
+      ? selectedIndices
+      : (() => {
+          const end = sampleLimit > 0 ? Math.min(allProblems.length, startIndex + sampleLimit) : allProblems.length;
+          return Array.from({ length: Math.max(0, end - startIndex) }, (_, offset) => startIndex + offset);
+        })();
+    const benchmarkChanged = benchmark.id !== run.benchmark;
+    const selectedIndexSet = new Set(effectiveSelectedIndices);
+    run.results = benchmarkChanged
+      ? []
+      : run.results.filter((result) => selectedIndexSet.has(result.index) && Number(result.passNumber || 1) <= passCount);
+    run.benchmark = benchmark.id;
+    if (benchmarkChanged) run.benchmarkDataRevision = benchmark.dataRevision || null;
+    run.baseUrl = baseUrl;
+    run.apiKey = String(config.apiKey ?? run.apiKey ?? "").trim();
+    run.model = String(config.model ?? run.model ?? "").trim();
+    run.temperature = Number(config.temperature ?? run.temperature ?? 0);
+    run.maxOutputTokens = normalizeTokenCount(config.maxOutputTokens ?? run.maxOutputTokens, 2048);
+    run.thinkingEnabled = config.thinkingEnabled ?? run.thinkingEnabled;
+    run.thinkingBudget = normalizeTokenCount(config.thinkingBudget ?? run.thinkingBudget, 8192);
+    run.timeoutSeconds = Number(config.timeoutSeconds ?? run.timeoutSeconds ?? 15);
+    run.parallelTasks = parallelTasks;
+    run.passCount = passCount;
+    run.sampleLimit = sampleLimit;
+    run.startIndex = startIndex;
+    run.selectedIndices = effectiveSelectedIndices;
+    run.systemPrompt = String(config.systemPrompt ?? run.systemPrompt ?? benchmark.defaultSystemPrompt);
+    run.promptTemplate = String(config.promptTemplate ?? run.promptTemplate ?? benchmark.defaultPromptTemplate);
+    run.extraBody = config.extraBody && typeof config.extraBody === "object" ? config.extraBody : run.extraBody;
+    run.adaptiveRepetitionPenalty = adaptiveRepetitionPenalty;
+    run.repetitionPenalty = repetitionPenalty;
+    if (
+      Object.hasOwn(config, "adaptiveRepetitionPenalty")
+      || Object.hasOwn(config, "repetitionPenalty")
+      || Object.hasOwn(config, "extraBody")
+    ) {
+      run.currentRepetitionPenalty = initialRepetitionPenalty(repetitionPenalty, run.extraBody);
+      run.knownLoopingPenalty = null;
+    }
+    run.total = effectiveSelectedIndices.length * passCount;
+    run.publicConfig = {
+      baseUrl,
+      benchmark: benchmark.id,
+      model: run.model,
+      temperature: run.temperature,
+      maxOutputTokens: run.maxOutputTokens,
+      thinkingEnabled: run.thinkingEnabled,
+      thinkingBudget: run.thinkingBudget,
+      timeoutSeconds: run.timeoutSeconds,
+      parallelTasks,
+      passCount,
+      apiKey: redactApiKey(run.apiKey, baseUrl),
+      sampleLimit,
+      startIndex,
+      testNumbers,
+      systemPrompt: run.systemPrompt,
+      promptTemplate: run.promptTemplate,
+      extraBody: run.extraBody,
+      adaptiveRepetitionPenalty,
+      repetitionPenalty,
+      loopDetectionConfig: LOOP_DETECTION_CONFIG
+    };
+    syncRunCountsFromResults(run);
+    if (!run.model) throw new Error("Model name is required.");
   }
 
   // Async pre-checks for resume, separated so resumeRun itself stays
@@ -1178,13 +1300,7 @@ export function createRuntimeServer({
         }
         if (req.method === "POST" && runMatch[2] === "resume") {
           const body = await readJsonBody(req);
-          // The field is the source of truth on every resume: a run's stored
-          // key can be stale (never set, redacted after a restart, or since
-          // rotated), so whatever is currently typed replaces it outright.
-          if (typeof body.apiKey === "string") {
-            run.apiKey = body.apiKey.trim();
-            run.publicConfig.apiKey = redactApiKey(run.apiKey, run.baseUrl);
-          }
+          await applyResumeConfig(run, body);
           await assertRunResumable(run);
           const resumedRun = resumeRun(run);
           return sendJson(res, 200, runSummary(resumedRun, { includeResults: false }));

@@ -188,6 +188,36 @@ describe("runtime server", () => {
     });
   });
 
+  it("rejects thinking when VLM Run model metadata says it is unsupported", async () => {
+    const rootDir = await makeRootDir();
+    const { apiUrl } = await startRuntime(rootDir, {
+      fetchImplementation: async (url) => {
+        if (String(url) === "https://gateway.vlm.run/v1/models/qwen%2Fqwen3.5-0.8b") {
+          return new Response(JSON.stringify({
+            supported_parameters: ["temperature", "top_p", "max_tokens", "response_format", "stop"]
+          }));
+        }
+        return new Response("not found", { status: 404 });
+      }
+    });
+
+    const response = await fetch(`${apiUrl}/api/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: "https://gateway.vlm.run/v1/openai",
+        model: "qwen/qwen3.5-0.8b",
+        thinkingEnabled: true,
+        testNumbers: "0"
+      })
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Model \"qwen/qwen3.5-0.8b\" on gateway.vlm.run does not support thinking. Its live model metadata lists only: temperature, top_p, max_tokens, response_format, stop. Turn off thinking or use an endpoint that supports enable_thinking."
+    });
+  });
+
   it("stops loops and adapts repetition penalties across tasks", async () => {
     const rootDir = await makeRootDir();
     const model = await startModelServer([loopingModelHandler, goodModelHandler]);
@@ -405,6 +435,78 @@ describe("runtime server", () => {
     const resumedDetail = await waitForStatus(apiUrl, created.id, ["completed"]);
     expect(resumedDetail).toMatchObject({ completed: 1, passed: 1, failed: 0 });
     expect(resumedDetail.results[0].modelError).toBeUndefined();
+  });
+
+  it("replaces saved request parameters with the current form config on resume", async () => {
+    const rootDir = await makeRootDir();
+    const originalEndpoint = await startModelServer([
+      (request, response) => {
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ detail: "Not Found" }));
+      }
+    ]);
+    const correctedEndpoint = await startModelServer([goodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, originalEndpoint.baseUrl, { testNumbers: "0" });
+    await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    const resumeResponse = await fetch(`${apiUrl}/api/runs/${created.id}/resume`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        benchmark: "humaneval",
+        baseUrl: correctedEndpoint.baseUrl,
+        apiKey: "replacement-key",
+        model: "replacement-model",
+        maxOutputTokens: 768,
+        thinkingEnabled: false,
+        thinkingBudget: 4096,
+        timeoutSeconds: 9,
+        parallelTasks: 2,
+        passCount: 1,
+        adaptiveRepetitionPenalty: false,
+        repetitionPenalty: 1.25,
+        sampleLimit: 0,
+        startIndex: 0,
+        testNumbers: "0",
+        systemPrompt: "Replacement system prompt",
+        promptTemplate: "Replacement task: %problem_code%",
+        temperature: 0.3,
+        extraBody: { top_p: 0.7 }
+      })
+    });
+    expect(resumeResponse.ok).toBe(true);
+    const resumedDetail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(correctedEndpoint.requests).toHaveLength(1);
+    expect(correctedEndpoint.requests[0]).toMatchObject({
+      url: "/v1/chat/completions",
+      headers: { authorization: "Bearer replacement-key" },
+      body: {
+        model: "replacement-model",
+        temperature: 0.3,
+        max_tokens: 768,
+        top_p: 0.7,
+        messages: [
+          { role: "system", content: "Replacement system prompt" },
+          { role: "user" }
+        ]
+      }
+    });
+    expect(resumedDetail.config).toMatchObject({
+      baseUrl: correctedEndpoint.baseUrl,
+      model: "replacement-model",
+      maxOutputTokens: 768,
+      thinkingEnabled: false,
+      thinkingBudget: 4096,
+      timeoutSeconds: 9,
+      parallelTasks: 2,
+      repetitionPenalty: 1.25,
+      systemPrompt: "Replacement system prompt",
+      promptTemplate: "Replacement task: %problem_code%",
+      extraBody: { top_p: 0.7 }
+    });
   });
 
   it("runs multiple passes with parallel workers and distinct attempt ids", async () => {
@@ -751,6 +853,7 @@ describe("runtime server", () => {
 
     expect(model.requests[0].body).toMatchObject({
       max_tokens: 1000,
+      enable_thinking: true,
       thinking_budget: 300,
       chat_template_kwargs: { enable_thinking: true }
     });
@@ -765,6 +868,7 @@ describe("runtime server", () => {
 
     expect(model.requests[1].body).toMatchObject({
       max_tokens: 700,
+      enable_thinking: false,
       thinking_budget: 0,
       chat_template_kwargs: { enable_thinking: false }
     });
