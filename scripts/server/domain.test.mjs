@@ -157,14 +157,14 @@ describe("server domain helpers", () => {
     expect(run).toMatchObject({ completed: 1, passed: 1, failed: 0 });
   });
 
-  it("redacts api keys for remote endpoints but keeps them for local ones", () => {
+  it("redacts api keys for every endpoint", () => {
     expect(redactApiKey(" sk-live-secret ", "https://api.example.com/v1")).toBe("***");
     expect(redactApiKey("", "https://api.example.com/v1")).toBe("");
     expect(redactApiKey(undefined, "https://api.example.com/v1")).toBe("");
     expect(redactApiKey(" sk-live-secret ")).toBe("***");
-    expect(redactApiKey(" sk-live-secret ", "http://localhost:8000/v1")).toBe("sk-live-secret");
-    expect(redactApiKey(" sk-live-secret ", "http://127.0.0.1:8000/v1")).toBe("sk-live-secret");
-    expect(redactApiKey(" sk-live-secret ", "http://[::1]:8000/v1")).toBe("sk-live-secret");
+    expect(redactApiKey(" sk-live-secret ", "http://localhost:8000/v1")).toBe("***");
+    expect(redactApiKey(" sk-live-secret ", "http://127.0.0.1:8000/v1")).toBe("***");
+    expect(redactApiKey(" sk-live-secret ", "http://[::1]:8000/v1")).toBe("***");
   });
 
   it("recognizes local base URLs", () => {
@@ -214,7 +214,7 @@ describe("server domain helpers", () => {
     });
   });
 
-  it("keeps a real api key for persisted local runs instead of redacting it", () => {
+  it("loads a legacy local key into memory but redacts the public config", () => {
     const runtimeConfig = runtimeConfigFromPersistedRun({
       baseUrl: "http://localhost:8000/v1",
       config: {
@@ -224,7 +224,7 @@ describe("server domain helpers", () => {
     });
 
     expect(runtimeConfig.apiKey).toBe("sk-live-secret");
-    expect(runtimeConfig.publicConfig.apiKey).toBe("sk-live-secret");
+    expect(runtimeConfig.publicConfig.apiKey).toBe("***");
   });
 
   it("discards model-error attempts before resuming a run", () => {

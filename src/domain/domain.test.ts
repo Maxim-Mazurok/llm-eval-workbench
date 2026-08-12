@@ -22,11 +22,13 @@ import {
 } from "./passes";
 import { currentPassTiming } from "./passTiming";
 import { buildInstructionPromptFallback, formatPromptMessages } from "./prompts";
+import { providerQueueIsActive } from "./providers";
 import {
   anyRunLive,
   assertionStats,
   completedMetricLines,
   failureStats,
+  formatMs,
   liveEstimate,
   progressSegments,
   resultNumbers,
@@ -96,6 +98,10 @@ describe("benchmark API origin", () => {
 });
 
 describe("run domain helpers", () => {
+  it("rounds sub-second durations for display", () => {
+    expect(formatMs(531.3416666666667)).toBe("531ms");
+  });
+
   it("reports a live queue and badge positions only for queued runs", () => {
     expect(anyRunLive([])).toBe(false);
     expect(anyRunLive([run({ status: "completed" }), run({ status: "cancelled" })])).toBe(false);
@@ -390,6 +396,25 @@ describe("pass and task derivation", () => {
       [1, 2, "pass"],
       [3, 3, "fail"]
     ]);
+  });
+});
+
+describe("provider scheduling", () => {
+  const azure = { id: "azure", name: "Azure", baseUrl: "https://azure.example/v1", hasApiKey: true };
+  const openai = { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", hasApiKey: true };
+  const local = { id: "local-b", name: "Local B", baseUrl: "http://127.0.0.1:9000/v1", hasApiKey: false };
+
+  it("only reports a remote provider's own lane as active", () => {
+    const runs = [run({ status: "running", providerId: "azure", config: { providerId: "azure" }, baseUrl: azure.baseUrl })];
+
+    expect(providerQueueIsActive(runs, azure)).toBe(true);
+    expect(providerQueueIsActive(runs, openai)).toBe(false);
+  });
+
+  it("treats all loopback URLs as one shared local lane", () => {
+    const runs = [run({ status: "running", providerId: "local-a", config: { providerId: "local-a" }, baseUrl: "http://localhost:8000/v1" })];
+
+    expect(providerQueueIsActive(runs, local)).toBe(true);
   });
 });
 

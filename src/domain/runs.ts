@@ -103,7 +103,7 @@ export function progressSegments(run?: BenchRun | null) {
 
 export function formatMs(value?: number) {
   if (!value) return "n/a";
-  if (value < 1000) return `${value}ms`;
+  if (value < 1000) return `${Math.round(value)}ms`;
   if (value >= 60_000) return formatDuration(value);
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}s`;
 }
