@@ -22,7 +22,7 @@ import {
 } from "./passes";
 import { currentPassTiming } from "./passTiming";
 import { buildInstructionPromptFallback, formatPromptMessages } from "./prompts";
-import { providerQueueIsActive } from "./providers";
+import { providerKindLabel, providerQueueIsActive } from "./providers";
 import {
   anyRunLive,
   assertionStats,
@@ -415,6 +415,13 @@ describe("provider scheduling", () => {
     const runs = [run({ status: "running", providerId: "local-a", config: { providerId: "local-a" }, baseUrl: "http://localhost:8000/v1" })];
 
     expect(providerQueueIsActive(runs, local)).toBe(true);
+  });
+
+  it("identifies VLM agent and inference endpoints", () => {
+    expect(providerKindLabel("https://api.vlm.run/v1/openai")).toBe("Agent");
+    expect(providerKindLabel("https://agent.vlm.run/v1/openai")).toBe("Agent");
+    expect(providerKindLabel("https://gateway.vlm.run/v1/openai")).toBe("Inference");
+    expect(providerKindLabel("https://api.openai.com/v1")).toBeUndefined();
   });
 });
 

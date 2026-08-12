@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelCombobox } from "./ModelCombobox";
+import { ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
 afterEach(cleanup);
 
@@ -68,5 +68,19 @@ describe("ModelCombobox", () => {
     await userEvent.click(screen.getByRole("combobox"));
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.getByText("Loading models…")).toBeInTheDocument();
+  });
+
+  it("labels known VLM providers by request type", async () => {
+    render(<ProviderCombobox
+      value="gateway"
+      onChange={() => {}}
+      providers={[
+        { id: "agent", name: "VLM Orion", baseUrl: "https://api.vlm.run/v1/openai", hasApiKey: true },
+        { id: "gateway", name: "VLM Gateway", baseUrl: "https://gateway.vlm.run/v1/openai", hasApiKey: true }
+      ]}
+    />);
+    await userEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Inference")).toBeInTheDocument();
   });
 });

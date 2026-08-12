@@ -28,6 +28,18 @@ export function isLocalProviderUrl(baseUrl?: string | null) {
   }
 }
 
+/** VLM Run's API/agent hosts run Orion; its gateway routes plain inference. */
+export function providerKindLabel(baseUrl?: string | null): "Agent" | "Inference" | undefined {
+  try {
+    const hostname = new URL(String(baseUrl || "")).hostname.toLocaleLowerCase();
+    if (hostname === "api.vlm.run" || hostname === "agent.vlm.run") return "Agent";
+    if (hostname === "gateway.vlm.run") return "Inference";
+  } catch {
+    // Invalid URLs are handled by provider validation.
+  }
+  return undefined;
+}
+
 export function providerQueueIsActive(
   runs: BenchRun[],
   selectedProvider?: ProviderConfig | null
@@ -40,4 +52,3 @@ export function providerQueueIsActive(
     return (run.config?.providerId ?? run.providerId) === selectedProvider.id;
   });
 }
-

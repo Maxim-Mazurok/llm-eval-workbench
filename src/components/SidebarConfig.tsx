@@ -15,7 +15,7 @@ import {
   type BenchRun
 } from "../domain/benchmark";
 import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive } from "../domain/runs";
-import type { ProviderConfig } from "../domain/providers";
+import { providerKindLabel, type ProviderConfig } from "../domain/providers";
 import { BenchmarkCombobox, ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
 export type SidebarConfigProps = {
@@ -77,6 +77,7 @@ export type SidebarConfigProps = {
 
 export function SidebarConfig(props: SidebarConfigProps) {
   const selectedBenchmark = benchmarkOption(props.benchmark);
+  const providerKind = providerKindLabel(props.selectedProvider?.baseUrl);
   return (
     <aside className="bench-sidebar">
       <div className="bench-title-row">
@@ -146,13 +147,22 @@ export function SidebarConfig(props: SidebarConfigProps) {
           tags={Object.fromEntries(
             props.availableModels.map((modelId) => [
               modelId,
-              props.modelTypes[modelId] === "vlm" ? "vision" : undefined
+              [
+                providerKind?.toLocaleLowerCase(),
+                props.modelTypes[modelId] === "vlm" ? "vision" : undefined
+              ].filter(Boolean).join(" · ") || undefined
             ])
           )}
           value={props.model}
           onChange={props.setModel}
           onOpen={props.onRefreshModels}
         />
+        {providerKind === "Agent" ? (
+          <small className="field-warning provider-kind-warning">
+            Agent endpoint — Orion adds agent/tool context, so tiny prompts can be billed with substantial input overhead.
+            Use a provider tagged “Inference” for ordinary model benchmarks.
+          </small>
+        ) : null}
         {selectedBenchmark.attachesImages
           && props.modelTypes[props.model.trim()] !== undefined
           && props.modelTypes[props.model.trim()] !== "vlm" ? (
