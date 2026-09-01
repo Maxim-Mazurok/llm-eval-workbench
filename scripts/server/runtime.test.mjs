@@ -973,6 +973,151 @@ describe("runtime server", () => {
     });
   });
 
+  it("uses the LM Studio SDK reasoning budget for GGUF models", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          models: [{ key: "test-model", format: "gguf", loaded_instances: [{ id: "test-model" }] }]
+        }));
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const clientOptions = [];
+    const predictionRequests = [];
+    const lmStudioClientFactory = (options) => {
+      clientOptions.push(options);
+      return {
+        llm: {
+          model: async () => ({
+            respond(messages, predictionConfig) {
+              predictionRequests.push({ messages, predictionConfig });
+              const fragments = [
+                { content: "<think>", tokensCount: 1, reasoningType: "reasoningStartTag" },
+                { content: "plan", tokensCount: 1, reasoningType: "reasoning" },
+                { content: "</think>", tokensCount: 1, reasoningType: "reasoningEndTag" },
+                { content: "```python\ndef add_one(x):\n    return x + 1\n```", tokensCount: 7, reasoningType: "none" }
+              ];
+              return {
+                async *[Symbol.asyncIterator]() {
+                  yield* fragments;
+                },
+                async result() {
+                  return {
+                    stats: {
+                      stopReason: "eosFound",
+                      promptTokensCount: 20,
+                      predictedTokensCount: 10
+                    }
+                  };
+                },
+                async cancel() {}
+              };
+            }
+          })
+        },
+        async [Symbol.asyncDispose]() {}
+      };
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore, lmStudioClientFactory });
+
+    const created = await createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      maxOutputTokens: 700,
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail).toMatchObject({ passed: 1, failed: 0 });
+    expect(detail.results[0]).toMatchObject({
+      rawOutput: "```python\ndef add_one(x):\n    return x + 1\n```",
+      thinkingOutput: "plan",
+      usage: {
+        prompt_tokens: 20,
+        completion_tokens: 10,
+        completion_tokens_details: { reasoning_tokens: 1 }
+      }
+    });
+    expect(clientOptions).toEqual([{ baseUrl: new URL(modelServer.baseUrl).origin.replace("http:", "ws:") }]);
+    expect(predictionRequests[0].predictionConfig).toMatchObject({
+      maxTokens: 1000,
+      reasoningBudget: 300,
+      enableThinking: true,
+      temperature: 0
+    });
+  });
+
+  it("rejects LM Studio MLX models when a numeric thinking budget is enabled", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          models: [{ key: "test-model", format: "mlx", loaded_instances: [{ id: "test-model" }] }]
+        }));
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore });
+
+    await expect(createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    })).rejects.toThrow(
+      'Model "test-model" is loaded in LM Studio as mlx. Numeric reasoning budgets require a GGUF model on the llama.cpp runtime.'
+    );
+  });
+
+  it("rejects unverifiable LM Studio reasoning budgets instead of silently using OpenAI transport", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(404);
+        response.end();
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore });
+
+    await expect(createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    })).rejects.toThrow(
+      'Could not verify model "test-model" through LM Studio\'s model metadata API.'
+    );
+  });
+
   it("runs different remote providers concurrently but serializes each provider's queue", async () => {
     const rootDir = await makeRootDir();
     const starts = [];
