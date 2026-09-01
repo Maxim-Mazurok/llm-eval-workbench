@@ -27,6 +27,7 @@ import {
 } from "./domain.mjs";
 import { createProviderStore } from "./providerStore.mjs";
 import { benchmarkSummaries, benchmarks, getBenchmark } from "./benchmarks/registry.mjs";
+import { createLmStudioChatCompletionResponse } from "./lmStudioModel.mjs";
 import { fetchModelResponseWithRetry, throwIfRetryableModelOutput } from "./modelRetry.mjs";
 import {
   detectRepetitionLoop,
@@ -70,7 +71,8 @@ export function createRuntimeServer({
   performanceLogEnabled = process.env.LLM_EVAL_PERFORMANCE_LOG === "1",
   fetchImplementation = fetch,
   maxReplayEvents = 5000,
-  providerStore: configuredProviderStore
+  providerStore: configuredProviderStore,
+  lmStudioClientFactory
 } = {}) {
   const cacheDir = join(rootDir, ".cache");
   const configDir = join(rootDir, ".config");
@@ -352,9 +354,6 @@ export function createRuntimeServer({
       throw new Error(`Model request failed: HTTP ${response.status} ${text.slice(0, 1000)}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
     let output = "";
     let thinking = "";
     let usage = null;
@@ -440,6 +439,9 @@ export function createRuntimeServer({
       return responseResult();
     }
 
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
     let receivedDoneMarker = false;
     function processFrame(frame) {
       for (const line of frame.split("\n")) {
@@ -557,6 +559,15 @@ export function createRuntimeServer({
       delete body.repetition_penalty;
     }
     if (Number.isFinite(context.repetitionPenalty)) body.repetition_penalty = context.repetitionPenalty;
+    const lmStudioPredictionConfig = {
+      maxTokens: normalizeTokenCount(body.max_tokens, thinkingBudget + run.maxOutputTokens),
+      reasoningBudget: thinkingBudget,
+      enableThinking: run.thinkingEnabled,
+      temperature: Number(body.temperature),
+      ...(Number.isFinite(Number(body.repetition_penalty))
+        ? { repeatPenalty: Number(body.repetition_penalty) }
+        : {})
+    };
 
     appendEvent(run, "prompt", {
       taskId: problem.task_id,
@@ -566,13 +577,25 @@ export function createRuntimeServer({
       ...(Array.isArray(problem.images) && problem.images.length
         ? { imageFiles: problem.images.map((image) => image.file) }
         : {}),
-      request: { ...body, messages }
+      request: run.usesLmStudioSdk
+        ? { transport: "lmstudio-sdk", model: run.model, messages, predictionConfig: lmStudioPredictionConfig }
+        : { ...body, messages }
     });
     const started = Date.now();
     try {
       return await fetchModelResponseWithRetry({
-        fetchImplementation,
-        requestUrl: `${run.baseUrl}/chat/completions`,
+        fetchImplementation: run.usesLmStudioSdk
+          ? () => createLmStudioChatCompletionResponse({
+              baseUrl: run.baseUrl,
+              apiKey: run.apiKey,
+              model: run.model,
+              messages,
+              predictionConfig: lmStudioPredictionConfig,
+              signal: controller.signal,
+              clientFactory: lmStudioClientFactory
+            })
+          : fetchImplementation,
+        requestUrl: run.usesLmStudioSdk ? run.baseUrl : `${run.baseUrl}/chat/completions`,
         requestOptions: {
           method: "POST",
           headers: {
@@ -903,6 +926,49 @@ export function createRuntimeServer({
     }
   }
 
+  async function fetchLmStudioModelInfo(baseUrl, modelId, apiKey) {
+    try {
+      const origin = new URL(baseUrl).origin;
+      const response = await fetchImplementation(`${origin}/api/v1/models`, {
+        signal: AbortSignal.timeout(2000),
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      if (!Array.isArray(payload?.models)) return null;
+      const normalizedModelId = String(modelId || "").trim();
+      return payload.models.find((modelInfo) => (
+        modelInfo?.key === normalizedModelId
+        || modelInfo?.loaded_instances?.some((instance) => instance?.id === normalizedModelId)
+      )) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function usesLmStudioSdkForThinking(baseUrl, modelId, thinkingEnabled, apiKey, providerName) {
+    if (!thinkingEnabled) return false;
+    const namedLmStudioProvider = String(providerName || "").toLowerCase().includes("lm studio");
+    const endpointUrl = new URL(baseUrl);
+    if (!namedLmStudioProvider && (providerName || endpointUrl.port !== "1234")) return false;
+    const modelInfo = await fetchLmStudioModelInfo(baseUrl, modelId, apiKey);
+    if (!modelInfo) {
+      if (!namedLmStudioProvider) return false;
+      throw new Error(
+        `Could not verify model "${modelId}" through LM Studio's model metadata API. `
+        + "Make sure LM Studio is running, the model is loaded, and its server is up to date."
+      );
+    }
+    if (modelInfo.format !== "gguf") {
+      throw new Error(
+        `Model "${modelId}" is loaded in LM Studio as ${modelInfo.format || "an unknown format"}. `
+        + "Numeric reasoning budgets require a GGUF model on the llama.cpp runtime. "
+        + "Load the GGUF variant or turn off thinking."
+      );
+    }
+    return true;
+  }
+
   // A text-only model does not error on image parts — oMLX silently drops
   // them and the model answers from the text alone ("we cannot see the
   // photo"), producing garbage scores that look like a completed run. Refuse
@@ -981,6 +1047,13 @@ export function createRuntimeServer({
       config.thinkingEnabled !== false,
       apiKey
     );
+    const usesLmStudioSdk = await usesLmStudioSdkForThinking(
+      baseUrl,
+      config.model,
+      config.thinkingEnabled !== false,
+      apiKey,
+      providerName
+    );
     const selectedIndices = parseTestNumbers(config.testNumbers, allProblems.length, benchmark.taskIdPattern);
     const adaptiveRepetitionPenalty = Boolean(config.adaptiveRepetitionPenalty);
     const repetitionPenalty = Number(config.repetitionPenalty ?? 1);
@@ -1011,6 +1084,7 @@ export function createRuntimeServer({
       providerName,
       baseUrl,
       apiKey,
+      usesLmStudioSdk,
       temperature: Number(config.temperature ?? 0),
       maxOutputTokens: normalizeTokenCount(config.maxOutputTokens, 2048),
       thinkingEnabled: config.thinkingEnabled !== false,
@@ -1176,6 +1250,13 @@ export function createRuntimeServer({
     const benchmark = getBenchmark(run.benchmark);
     const problems = await loadBenchmarkProblems(benchmark);
     await assertModelCanSeeImages(run.baseUrl, run.model, benchmark, problems, run.apiKey);
+    run.usesLmStudioSdk = await usesLmStudioSdkForThinking(
+      run.baseUrl,
+      run.model,
+      run.thinkingEnabled,
+      run.apiKey,
+      run.providerName
+    );
   }
 
   function resumeRun(run) {
