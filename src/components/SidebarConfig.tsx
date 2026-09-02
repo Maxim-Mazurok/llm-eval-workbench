@@ -1,5 +1,4 @@
 import {
-  CircleStop,
   FileText,
   ListPlus,
   PanelLeftClose,
@@ -14,7 +13,7 @@ import {
   type BenchmarkId,
   type BenchRun
 } from "../domain/benchmark";
-import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive } from "../domain/runs";
+import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive, type RunStopMode } from "../domain/runs";
 import { providerKindLabel, type ProviderConfig } from "../domain/providers";
 import { BenchmarkCombobox, ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
@@ -54,7 +53,7 @@ export type SidebarConfigProps = {
   error: string | null;
   onCollapse: () => void;
   onStartRun: () => void;
-  onCancelRun: () => void;
+  onCancelRun: (stopMode: RunStopMode) => void;
   onResumeRun: () => void;
   setBenchmark: (value: BenchmarkId) => void;
   setProviderId: (value: string) => void;
@@ -265,9 +264,18 @@ export function SidebarConfig(props: SidebarConfigProps) {
         >
           {props.queueActive ? <><ListPlus size={17} /> Queue resume</> : <><RotateCcw size={17} /> Resume</>}
         </button>
-        <button className="secondary-action" type="button" onClick={props.onCancelRun} disabled={!statusIsLive(props.selectedRun?.status)}>
-          <CircleStop size={17} /> Stop selected
-        </button>
+        <select
+          aria-label="Stop run"
+          className="secondary-action stop-action"
+          value=""
+          onChange={(event) => props.onCancelRun(event.target.value as RunStopMode)}
+          disabled={!statusIsLive(props.selectedRun?.status)}
+        >
+          <option value="" disabled>Stop</option>
+          <option value="immediate">Stop now</option>
+          <option value="after-task" disabled={props.selectedRun?.status !== "running"}>Stop after current task</option>
+          <option value="after-pass" disabled={props.selectedRun?.status !== "running"}>Stop after current pass</option>
+        </select>
       </div>
       {props.error ? <p className="bench-error">{props.error}</p> : null}
     </aside>

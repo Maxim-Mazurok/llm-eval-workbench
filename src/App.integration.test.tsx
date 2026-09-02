@@ -1467,6 +1467,39 @@ describe("App notifications", () => {
     expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
   });
 
+  it("offers immediate, task, and pass stop modes for the selected run", async () => {
+    window.history.replaceState(null, "", "/run/run-1");
+    const runningRun = baseRun({
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [runningRun] });
+      return jsonResponse({ ...runningRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const stopSelect = await screen.findByRole("combobox", { name: "Stop run" });
+    expect(stopSelect).toHaveValue("");
+    expect(within(stopSelect).getByRole("option", { name: "Stop" })).toBeInTheDocument();
+    expect(within(stopSelect).getByRole("option", { name: "Stop now" })).toBeInTheDocument();
+    expect(within(stopSelect).getByRole("option", { name: "Stop after current task" })).toBeInTheDocument();
+    expect(within(stopSelect).getByRole("option", { name: "Stop after current pass" })).toBeInTheDocument();
+
+    await userEvent.selectOptions(stopSelect, "immediate");
+    await userEvent.selectOptions(stopSelect, "after-task");
+    await userEvent.selectOptions(stopSelect, "after-pass");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-task", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-pass", { method: "POST" });
+  });
+
   it("shows queue position badges and removes a queued run when its badge is clicked", async () => {
     const runningRun = baseRun({
       id: "run-live",

@@ -32,6 +32,7 @@ import {
   runCanResume,
   readSidebarCollapsed,
   resultNumbers,
+  type RunStopMode,
   scoreRange,
   speedStats,
   statusIsLive,
@@ -403,10 +404,18 @@ export function useBenchmarkController() {
     }
   }
 
-  async function cancelRun() {
+  async function cancelRun(stopMode: RunStopMode) {
     if (!selectedRun || !statusIsLive(selectedRun.status)) return;
-    await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/cancel`, { method: "POST" });
-    await loadRuns();
+    setError(null);
+    try {
+      const stopPath = stopMode === "immediate" ? "cancel" : `stop?mode=${stopMode}`;
+      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/${stopPath}`, { method: "POST" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Failed to stop run");
+      await loadRuns();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : String(stopError));
+    }
   }
 
   // The queue badge's X. Cancelling a queued run is exactly "take it out of
