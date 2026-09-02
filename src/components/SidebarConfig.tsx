@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  CircleStop,
   FileText,
   ListPlus,
   PanelLeftClose,
@@ -8,6 +10,7 @@ import {
   Settings2,
   TerminalSquare
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
   benchmarkOption,
   type BenchmarkId,
@@ -73,6 +76,76 @@ export type SidebarConfigProps = {
   setPromptTemplate: (value: string) => void;
   setExtraBody: (value: string) => void;
 };
+
+function StopSplitButton({
+  selectedRun,
+  onCancelRun
+}: {
+  selectedRun: BenchRun | null;
+  onCancelRun: (stopMode: RunStopMode) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stopDisabled = !statusIsLive(selectedRun?.status);
+  const gracefulStopDisabled = selectedRun?.status !== "running";
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (gracefulStopDisabled) setMenuOpen(false);
+  }, [gracefulStopDisabled]);
+
+  function stopAfter(stopMode: RunStopMode) {
+    setMenuOpen(false);
+    onCancelRun(stopMode);
+  }
+
+  return (
+    <div
+      className="stop-split-button"
+      ref={containerRef}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !menuOpen) return;
+        event.preventDefault();
+        setMenuOpen(false);
+      }}
+    >
+      <button
+        aria-label="Stop run now"
+        className="secondary-action stop-split-main"
+        type="button"
+        onClick={() => onCancelRun("immediate")}
+        disabled={stopDisabled}
+      >
+        <CircleStop size={17} /> Stop
+      </button>
+      <button
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
+        aria-label={menuOpen ? "Hide stop options" : "Show stop options"}
+        className="secondary-action stop-split-toggle"
+        type="button"
+        onClick={() => setMenuOpen((previous) => !previous)}
+        disabled={gracefulStopDisabled}
+      >
+        <ChevronDown size={16} />
+      </button>
+      {menuOpen ? (
+        <div className="stop-options-menu" role="menu">
+          <button type="button" role="menuitem" onClick={() => stopAfter("after-task")}>After task</button>
+          <button type="button" role="menuitem" onClick={() => stopAfter("after-pass")}>After pass</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function SidebarConfig(props: SidebarConfigProps) {
   const selectedBenchmark = benchmarkOption(props.benchmark);
@@ -264,18 +337,7 @@ export function SidebarConfig(props: SidebarConfigProps) {
         >
           {props.queueActive ? <><ListPlus size={17} /> Queue resume</> : <><RotateCcw size={17} /> Resume</>}
         </button>
-        <select
-          aria-label="Stop run"
-          className="secondary-action stop-action"
-          value=""
-          onChange={(event) => props.onCancelRun(event.target.value as RunStopMode)}
-          disabled={!statusIsLive(props.selectedRun?.status)}
-        >
-          <option value="" disabled>Stop</option>
-          <option value="immediate">Stop now</option>
-          <option value="after-task" disabled={props.selectedRun?.status !== "running"}>Stop after current task</option>
-          <option value="after-pass" disabled={props.selectedRun?.status !== "running"}>Stop after current pass</option>
-        </select>
+        <StopSplitButton selectedRun={props.selectedRun} onCancelRun={props.onCancelRun} />
       </div>
       {props.error ? <p className="bench-error">{props.error}</p> : null}
     </aside>

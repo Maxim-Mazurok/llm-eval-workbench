@@ -1467,7 +1467,7 @@ describe("App notifications", () => {
     expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
   });
 
-  it("offers immediate, task, and pass stop modes for the selected run", async () => {
+  it("offers immediate, task, and pass actions in a split stop button", async () => {
     window.history.replaceState(null, "", "/run/run-1");
     const runningRun = baseRun({
       status: "running",
@@ -1484,16 +1484,17 @@ describe("App notifications", () => {
 
     render(<App />);
 
-    const stopSelect = await screen.findByRole("combobox", { name: "Stop run" });
-    expect(stopSelect).toHaveValue("");
-    expect(within(stopSelect).getByRole("option", { name: "Stop" })).toBeInTheDocument();
-    expect(within(stopSelect).getByRole("option", { name: "Stop now" })).toBeInTheDocument();
-    expect(within(stopSelect).getByRole("option", { name: "Stop after current task" })).toBeInTheDocument();
-    expect(within(stopSelect).getByRole("option", { name: "Stop after current pass" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Stop run now" }));
 
-    await userEvent.selectOptions(stopSelect, "immediate");
-    await userEvent.selectOptions(stopSelect, "after-task");
-    await userEvent.selectOptions(stopSelect, "after-pass");
+    const showStopOptionsButton = screen.getByRole("button", { name: "Show stop options" });
+    await userEvent.click(showStopOptionsButton);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "After task" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "After pass" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "After task" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "After pass" }));
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/cancel", { method: "POST" });
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-task", { method: "POST" });
