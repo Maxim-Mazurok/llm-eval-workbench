@@ -42,6 +42,10 @@ Conclusions:
 - Opus-Distilled quite a bit lower accuracy than base, might be more clever on math since that is what it was distilled on for the most part
 - Gemma-4-31B is very strong, barely fits tho
 
+### Qwen3.8-27B
+
+- 97.6% - 8192 thinking, 2048 output, 1 pass, qwen3.8-27b-uncensored-mlx + VLM MTP Qwen3.8-27B-MTP-4bit block-size 4, 13h32m (failed: 32, 47 - bad example but it followed because no refusal, 116, 145)
+
 ### gpt-oss-20b
 
 - 96.3% - 8192 thinking, 16384 tokens, 3 passes, gpt-oss-20b-MXFP4-Q8, 2h7m (failed: 10, 103, 106, 127, 145, 147)
@@ -59,6 +63,7 @@ Conclusions:
 - [WIP 55/460 2.2%-90.2%] - 18.2% - 8192? thinking, 16384 tokens, 1 pass, gpt-oss-20b-MXFP4-Q8, 2h15m, `BBEH Mini (official data)`
 - [WIP 29/460 0%-93.7%] - 0% - 16384 thinking, 18432 tokens, 1 pass, gemma-4-12B-it-8bit + VLM MTP gemma-4-12B-it-qat-assistant-bf16 block-size 3, 8h14m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` - looping all the time, both with default and 1.08 repetition penalty
 - [WIP 23/460 2%-97%] - 39.1% - 16384 thinking, 18432 tokens, 1 pass, gemma-4-12B-it-8bit, 13h, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1`
+- [WIP 35/460 3%-95.4%] - 40% - 8192 thinking, 8192 output, 1 pass, qwen3.8-27b-uncensored-mlx + VLM MTP Qwen3.8-27B-MTP-4bit block-size 4, 9h46m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1`
 
 - [WIP 62/460 8.9%-95.4%] - 66.1% - 8192 thinking, 16384 tokens, 1 pass, gemma-4-31B-it-MLX-4bit + VLM MTP gemma-4-31B-it-assistant-bf16, 9h45m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` - was hitting token limits, increasing them might improve score
 
