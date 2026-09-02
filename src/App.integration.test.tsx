@@ -21,6 +21,7 @@ type RunFixture = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  requestedStopMode?: "after-task" | "after-pass" | null;
   queuedAt?: string | null;
   queuePosition?: number | null;
   selectedIndices?: number[];
@@ -1475,30 +1476,53 @@ describe("App notifications", () => {
       currentTaskId: "HumanEval/0",
       activeTaskIds: ["HumanEval/0"]
     });
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    let currentRun = runningRun;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [runningRun] });
-      return jsonResponse({ ...runningRun, events: [] });
+      if (url.endsWith("/stop?mode=after-task") && init?.method === "POST") {
+        currentRun = { ...currentRun, requestedStopMode: "after-task" };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/stop?mode=after-pass") && init?.method === "POST") {
+        currentRun = { ...currentRun, requestedStopMode: "after-pass" };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/stop") && init?.method === "DELETE") {
+        currentRun = { ...currentRun, requestedStopMode: null };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [currentRun] });
+      return jsonResponse({ ...currentRun, events: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Stop run now" }));
-
-    const showStopOptionsButton = screen.getByRole("button", { name: "Show stop options" });
-    await userEvent.click(showStopOptionsButton);
+    await userEvent.click(await screen.findByRole("button", { name: "Show stop options" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "After task" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "After pass" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("menuitem", { name: "After task" }));
 
+    expect(await screen.findByRole("button", { name: "Stopping after task" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    expect(screen.getByRole("menuitem", { name: "Cancel stopping" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "After task" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cancel stopping" }));
+    expect(await screen.findByRole("button", { name: "Stop run now" })).toBeEnabled();
+
     await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "After pass" }));
+    expect(await screen.findByRole("button", { name: "Stopping after pass" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cancel stopping" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Stop run now" }));
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/cancel", { method: "POST" });
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-task", { method: "POST" });
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-pass", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop", { method: "DELETE" });
   });
 
   it("shows queue position badges and removes a queued run when its badge is clicked", async () => {

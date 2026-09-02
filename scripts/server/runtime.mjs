@@ -898,6 +898,7 @@ export function createRuntimeServer({
       persistRunArtifacts(run);
     } catch (error) {
       run.status = run.cancelled ? "cancelled" : "error";
+      run.requestedStopMode = null;
       run.finishedAt = new Date().toISOString();
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
@@ -1535,6 +1536,16 @@ export function createRuntimeServer({
           run.requestedStopMode = requestedStopMode;
           appendEvent(run, "stop-requested", {
             mode: requestedStopMode,
+            summary: runSummary(run, { includeResults: false })
+          });
+          return sendJson(res, 200, runSummary(run, { includeResults: false }));
+        }
+        if (req.method === "DELETE" && runMatch[2] === "stop") {
+          if (run.status !== "running" || !run.requestedStopMode) {
+            return sendJson(res, 409, { error: "Run has no pending stop request." });
+          }
+          run.requestedStopMode = null;
+          appendEvent(run, "stop-cancelled", {
             summary: runSummary(run, { includeResults: false })
           });
           return sendJson(res, 200, runSummary(run, { includeResults: false }));

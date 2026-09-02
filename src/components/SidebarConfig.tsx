@@ -57,6 +57,7 @@ export type SidebarConfigProps = {
   onCollapse: () => void;
   onStartRun: () => void;
   onCancelRun: (stopMode: RunStopMode) => void;
+  onCancelStopping: () => void;
   onResumeRun: () => void;
   setBenchmark: (value: BenchmarkId) => void;
   setProviderId: (value: string) => void;
@@ -79,15 +80,23 @@ export type SidebarConfigProps = {
 
 function StopSplitButton({
   selectedRun,
-  onCancelRun
+  onCancelRun,
+  onCancelStopping
 }: {
   selectedRun: BenchRun | null;
   onCancelRun: (stopMode: RunStopMode) => void;
+  onCancelStopping: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const stopDisabled = !statusIsLive(selectedRun?.status);
   const gracefulStopDisabled = selectedRun?.status !== "running";
+  const requestedStopMode = selectedRun?.requestedStopMode;
+  const stopLabel = requestedStopMode === "after-task"
+    ? "Stopping after task"
+    : requestedStopMode === "after-pass"
+      ? "Stopping after pass"
+      : "Stop";
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -109,7 +118,7 @@ function StopSplitButton({
 
   return (
     <div
-      className="stop-split-button"
+      className={requestedStopMode ? "stop-split-button is-stopping" : "stop-split-button"}
       ref={containerRef}
       onKeyDown={(event) => {
         if (event.key !== "Escape" || !menuOpen) return;
@@ -118,13 +127,13 @@ function StopSplitButton({
       }}
     >
       <button
-        aria-label="Stop run now"
+        aria-label={requestedStopMode ? stopLabel : "Stop run now"}
         className="secondary-action stop-split-main"
         type="button"
         onClick={() => onCancelRun("immediate")}
-        disabled={stopDisabled}
+        disabled={stopDisabled || Boolean(requestedStopMode)}
       >
-        <CircleStop size={17} /> Stop
+        <CircleStop size={17} /> {stopLabel}
       </button>
       <button
         aria-expanded={menuOpen}
@@ -139,8 +148,23 @@ function StopSplitButton({
       </button>
       {menuOpen ? (
         <div className="stop-options-menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => stopAfter("after-task")}>After task</button>
-          <button type="button" role="menuitem" onClick={() => stopAfter("after-pass")}>After pass</button>
+          {requestedStopMode ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onCancelStopping();
+              }}
+            >
+              Cancel stopping
+            </button>
+          ) : (
+            <>
+              <button type="button" role="menuitem" onClick={() => stopAfter("after-task")}>After task</button>
+              <button type="button" role="menuitem" onClick={() => stopAfter("after-pass")}>After pass</button>
+            </>
+          )}
         </div>
       ) : null}
     </div>
@@ -337,7 +361,11 @@ export function SidebarConfig(props: SidebarConfigProps) {
         >
           {props.queueActive ? <><ListPlus size={17} /> Queue resume</> : <><RotateCcw size={17} /> Resume</>}
         </button>
-        <StopSplitButton selectedRun={props.selectedRun} onCancelRun={props.onCancelRun} />
+        <StopSplitButton
+          selectedRun={props.selectedRun}
+          onCancelRun={props.onCancelRun}
+          onCancelStopping={props.onCancelStopping}
+        />
       </div>
       {props.error ? <p className="bench-error">{props.error}</p> : null}
     </aside>

@@ -79,6 +79,7 @@ export default function App() {
     selectNewBench,
     startRun,
     cancelRun,
+    cancelStopping,
     resumeRun,
     deleteRun,
     removeRunFromQueue,
@@ -139,6 +140,7 @@ export default function App() {
           onCollapse={() => setSidebarCollapsed(true)}
           onStartRun={startRun}
           onCancelRun={cancelRun}
+          onCancelStopping={cancelStopping}
           onResumeRun={resumeRun}
           setBenchmark={setBenchmark}
           setProviderId={setProviderId}

@@ -232,6 +232,10 @@
   border-radius: 6px 0 0 6px;
 }
 
+.stop-split-button.is-stopping .stop-split-main:disabled {
+  opacity: 1;
+}
+
 .stop-split-toggle {
   min-width: 38px;
   padding: 0;
