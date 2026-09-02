@@ -269,6 +269,7 @@ export type BenchRun = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  requestedStopMode?: "after-task" | "after-pass" | null;
   /** When the run entered the waiting line; null once it has never queued. */
   queuedAt?: string | null;
   /** 1-based place in the waiting line while status is "queued"; null otherwise. */

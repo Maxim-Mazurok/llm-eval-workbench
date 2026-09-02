@@ -412,6 +412,21 @@ export function useBenchmarkController() {
       const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/${stopPath}`, { method: "POST" });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json.error || "Failed to stop run");
+      setRuns((previous) => updateRunInPlace(previous, json));
+      await loadRuns();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : String(stopError));
+    }
+  }
+
+  async function cancelStopping() {
+    if (!selectedRun?.requestedStopMode) return;
+    setError(null);
+    try {
+      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/stop`, { method: "DELETE" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Failed to cancel stopping");
+      setRuns((previous) => updateRunInPlace(previous, json));
       await loadRuns();
     } catch (stopError) {
       setError(stopError instanceof Error ? stopError.message : String(stopError));
@@ -568,6 +583,7 @@ export function useBenchmarkController() {
     selectNewBench,
     startRun,
     cancelRun,
+    cancelStopping,
     resumeRun,
     deleteRun,
     removeRunFromQueue,

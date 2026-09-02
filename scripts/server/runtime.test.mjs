@@ -769,6 +769,26 @@ describe("runtime server", () => {
     expect(model.requests).toHaveLength(3);
   });
 
+  it("cancels a pending graceful stop and continues the run", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 1)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0-2" });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(1));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-task`, { method: "POST" });
+    expect(await stopResponse.json()).toMatchObject({ requestedStopMode: "after-task" });
+    const continueResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop`, { method: "DELETE" });
+    expect(await continueResponse.json()).toMatchObject({ requestedStopMode: null });
+    heldResponses[0]();
+
+    const completed = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(completed).toMatchObject({ completed: 3, passed: 3, requestedStopMode: null });
+    expect(model.requests).toHaveLength(3);
+  });
+
   it("deletes a run and removes its artifacts from disk", async () => {
     const rootDir = await makeRootDir();
     const model = await startModelServer([goodModelHandler]);
