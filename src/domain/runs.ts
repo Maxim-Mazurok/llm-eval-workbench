@@ -6,6 +6,8 @@ import {
   type EventEnvelope
 } from "./benchmark";
 
+export type RunStopMode = "immediate" | "after-task" | "after-pass";
+
 export function pct(value?: number | null) {
   return `${Math.round((value || 0) * 1000) / 10}%`;
 }

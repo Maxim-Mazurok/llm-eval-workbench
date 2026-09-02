@@ -849,6 +849,7 @@ export function createRuntimeServer({
       async function runWorker(tasks, getNextTaskIndex) {
         while (true) {
           if (run.cancelled) throw new Error("Run cancelled.");
+          if (run.requestedStopMode === "after-task") return;
           const taskIndex = getNextTaskIndex();
           if (taskIndex >= tasks.length) return;
           await runTask(tasks[taskIndex]);
@@ -879,6 +880,13 @@ export function createRuntimeServer({
           return taskIndex;
         };
         await Promise.all(Array.from({ length: workerCount }, () => runWorker(remainingTasks, getNextTaskIndex)));
+        if (run.requestedStopMode === "after-task" || run.requestedStopMode === "after-pass") {
+          const requestedStopMode = run.requestedStopMode;
+          run.cancelled = true;
+          throw new Error(requestedStopMode === "after-task"
+            ? "Run stopped after current task."
+            : "Run stopped after current pass.");
+        }
       }
       run.status = "completed";
       run.finishedAt = new Date().toISOString();
@@ -1138,6 +1146,7 @@ export function createRuntimeServer({
       eventSeq: 0,
       clients: new Set(),
       cancelled: false,
+      requestedStopMode: null,
       abortController: null,
       abortControllers: new Set()
     };
@@ -1274,6 +1283,7 @@ export function createRuntimeServer({
       );
     }
     run.cancelled = false;
+    run.requestedStopMode = null;
     run.finishedAt = null;
     run.activeTaskIds = [];
     run.activeTaskStartedAt = {};
@@ -1488,7 +1498,7 @@ export function createRuntimeServer({
         const run = await createRun(body);
         return sendJson(res, 201, runSummary(run), { endpoint: "create-run", runId: run.id, resultCount: run.results.length });
       }
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(events|cancel|resume))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(events|cancel|stop|resume))?$/);
       if (runMatch) {
         const run = runs.get(runMatch[1]);
         if (!run) return sendJson(res, 404, { error: "Run not found" });
@@ -1513,6 +1523,21 @@ export function createRuntimeServer({
             resultCount: run.results.length,
             eventCount: run.events.length
           });
+        }
+        if (req.method === "POST" && runMatch[2] === "stop") {
+          const requestedStopMode = url.searchParams.get("mode");
+          if (!["after-task", "after-pass"].includes(requestedStopMode)) {
+            return sendJson(res, 400, { error: "Unknown stop mode." });
+          }
+          if (run.status !== "running") {
+            return sendJson(res, 409, { error: "Only a running run can stop gracefully." });
+          }
+          run.requestedStopMode = requestedStopMode;
+          appendEvent(run, "stop-requested", {
+            mode: requestedStopMode,
+            summary: runSummary(run, { includeResults: false })
+          });
+          return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
         if (req.method === "POST" && runMatch[2] === "cancel") {
           run.cancelled = true;

@@ -142,6 +142,18 @@ function makeHangingModelHandler(hangingResponses) {
   };
 }
 
+function makeHeldThenGoodModelHandler(heldResponses, heldRequestCount) {
+  let requestCount = 0;
+  return (req, res, body) => {
+    requestCount += 1;
+    if (requestCount <= heldRequestCount) {
+      heldResponses.push(() => goodModelHandler(req, res, body));
+      return;
+    }
+    goodModelHandler(req, res, body);
+  };
+}
+
 describe("runtime server", () => {
   it("proxies the endpoint's model list through /api/models", async () => {
     const rootDir = await makeRootDir();
@@ -713,6 +725,49 @@ describe("runtime server", () => {
     ]);
     expect(detail.events.some((event) => event.type === "error")).toBe(false);
   }, 15_000);
+
+  it("stops after currently active tasks finish without starting more tasks", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 2)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      parallelTasks: 2,
+      testNumbers: "0-2"
+    });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(2));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-task`, { method: "POST" });
+    expect(stopResponse.ok).toBe(true);
+    heldResponses.forEach((releaseResponse) => releaseResponse());
+
+    const stopped = await waitForStatus(apiUrl, created.id, ["cancelled"]);
+    expect(stopped).toMatchObject({ completed: 2, passed: 2, failed: 0 });
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it("stops after every task in the current pass finishes", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 2)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      parallelTasks: 2,
+      passCount: 2,
+      testNumbers: "0-2"
+    });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(2));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-pass`, { method: "POST" });
+    expect(stopResponse.ok).toBe(true);
+    heldResponses.forEach((releaseResponse) => releaseResponse());
+
+    const stopped = await waitForStatus(apiUrl, created.id, ["cancelled"]);
+    expect(stopped).toMatchObject({ completed: 3, passed: 3, failed: 0 });
+    expect(model.requests).toHaveLength(3);
+  });
 
   it("deletes a run and removes its artifacts from disk", async () => {
     const rootDir = await makeRootDir();
