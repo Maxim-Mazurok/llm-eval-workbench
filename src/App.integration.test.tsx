@@ -7,6 +7,7 @@ type RunFixture = {
   id: string;
   status: string;
   model: string;
+  baseUrl: string;
   createdAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
@@ -20,6 +21,7 @@ type RunFixture = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  requestedStopMode?: "after-task" | "after-pass" | null;
   queuedAt?: string | null;
   queuePosition?: number | null;
   selectedIndices?: number[];
@@ -33,6 +35,7 @@ const baseRun = (overrides: Partial<RunFixture> = {}): RunFixture => ({
   id: "run-1",
   status: "queued",
   model: "demo-model",
+  baseUrl: "http://localhost:8000/v1",
   createdAt: "2026-06-16T00:00:00.000Z",
   startedAt: null,
   finishedAt: null,
@@ -236,19 +239,17 @@ describe("App notifications", () => {
 
     const modelInput = await screen.findByPlaceholderText("provider/model-name");
     expect(modelInput).toHaveValue("");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://localhost:8000/v1");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server"));
 
     await userEvent.click(screen.getByRole("button", { name: /completed.*saved-model|saved-model.*completed/i }));
     await waitFor(() => expect(modelInput).toHaveValue("saved-model"));
     expect(window.location.pathname).toBe("/run/run-1");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://saved.example/v1");
-    // A real api key persisted for a local run's config loads back into the form.
-    expect(screen.getByPlaceholderText("optional")).toHaveValue("sk-live-secret");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server");
 
     await userEvent.click(screen.getByRole("button", { name: /new bench/i }));
     expect(window.location.pathname).toBe("/new");
     expect(modelInput).toHaveValue("");
-    expect(screen.getByPlaceholderText("https://host/v1")).toHaveValue("http://localhost:8000/v1");
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("Local model server");
     const extraBodyField = screen.getByText("Extra request body").closest("label")?.querySelector("textarea");
     expect(extraBodyField).toHaveValue("{\n  \"top_p\": 1\n}");
   });
@@ -663,8 +664,8 @@ describe("App notifications", () => {
     });
     expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
       benchmark: "humaneval",
-      baseUrl: "",
-      apiKey: "",
+      providerId: "local-default",
+      baseUrl: "http://localhost:8000/v1",
       model: "demo-model",
       maxOutputTokens: 2048,
       timeoutSeconds: 15,
@@ -723,8 +724,8 @@ describe("App notifications", () => {
     const resumeRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/runs/run-1/resume"));
     expect(JSON.parse(String(resumeRequest?.[1]?.body))).toMatchObject({
       benchmark: "humaneval",
-      baseUrl: "",
-      apiKey: "",
+      providerId: "local-default",
+      baseUrl: "http://localhost:8000/v1",
       model: "demo-model",
       maxOutputTokens: 2048,
       timeoutSeconds: 15,
@@ -1270,6 +1271,9 @@ describe("App notifications", () => {
     let detailFetches = 0;
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/providers")) {
+        return jsonResponse({ providers: [{ id: "local-default", name: "Local model server", baseUrl: "http://localhost:8000/v1", hasApiKey: false }] });
+      }
       if (url.endsWith("/api/benchmarks")) {
         return jsonResponse({ benchmarks: [] });
       }
@@ -1462,6 +1466,63 @@ describe("App notifications", () => {
     await waitFor(() => expect(queueResumeButton).toBeEnabled());
     expect(screen.queryByRole("button", { name: /start run/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^resume$/i })).not.toBeInTheDocument();
+  });
+
+  it("offers immediate, task, and pass actions in a split stop button", async () => {
+    window.history.replaceState(null, "", "/run/run-1");
+    const runningRun = baseRun({
+      status: "running",
+      startedAt: "2026-06-16T00:00:00.000Z",
+      currentTaskId: "HumanEval/0",
+      activeTaskIds: ["HumanEval/0"]
+    });
+    let currentRun = runningRun;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/stop?mode=after-task") && init?.method === "POST") {
+        currentRun = { ...currentRun, requestedStopMode: "after-task" };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/stop?mode=after-pass") && init?.method === "POST") {
+        currentRun = { ...currentRun, requestedStopMode: "after-pass" };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/stop") && init?.method === "DELETE") {
+        currentRun = { ...currentRun, requestedStopMode: null };
+        return jsonResponse(currentRun);
+      }
+      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [currentRun] });
+      return jsonResponse({ ...currentRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show stop options" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "After task" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "After pass" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "After task" }));
+
+    expect(await screen.findByRole("button", { name: "Stopping after task" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    expect(screen.getByRole("menuitem", { name: "Cancel stopping" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "After task" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cancel stopping" }));
+    expect(await screen.findByRole("button", { name: "Stop run now" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "After pass" }));
+    expect(await screen.findByRole("button", { name: "Stopping after pass" })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show stop options" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Cancel stopping" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Stop run now" }));
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/cancel", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-task", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop?mode=after-pass", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8787/api/runs/run-1/stop", { method: "DELETE" });
   });
 
   it("shows queue position badges and removes a queued run when its badge is clicked", async () => {

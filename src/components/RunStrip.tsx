@@ -78,7 +78,9 @@ export function RunStrip({
                   {completed ? <Check aria-hidden="true" size={9} strokeWidth={3} /> : null}
                 </span>
                 <strong>{candidate.model || "model"}</strong>
-                <small className="run-tab-benchmark">{benchmarkName}</small>
+                <small className="run-tab-benchmark">
+                  {benchmarkName}{candidate.providerName || candidate.config?.providerName ? ` · ${candidate.providerName ?? candidate.config?.providerName}` : ""}
+                </small>
                 <small className="run-tab-metrics" title={`Started ${formatTime(candidate.createdAt)}`}>
                   <span>{candidate.status}</span>
                   <span className="run-tab-count">{candidate.completed}/{total}</span>

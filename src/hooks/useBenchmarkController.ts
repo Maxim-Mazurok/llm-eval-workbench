@@ -21,7 +21,6 @@ import {
 import { thinkingInCommentsStats, thinkingResultNumbers } from "../domain/comments";
 import { currentPassTiming } from "../domain/passTiming";
 import {
-  anyRunLive,
   currentTaskStartedAtMs,
   formatTime,
   liveEstimate,
@@ -33,11 +32,13 @@ import {
   runCanResume,
   readSidebarCollapsed,
   resultNumbers,
+  type RunStopMode,
   scoreRange,
   speedStats,
   statusIsLive,
   updateRunInPlace
 } from "../domain/runs";
+import { providerQueueIsActive } from "../domain/providers";
 import {
   promptInfoByAttempt as derivePromptInfoByAttempt,
   taskGroupsFromRun,
@@ -53,6 +54,7 @@ import {
 import { useRunEvents } from "./useRunEvents";
 import { useBenchForm } from "./useBenchForm";
 import { useBenchmarkDefaults } from "./useBenchmarkDefaults";
+import { useProviders } from "./useProviders";
 
 export function useBenchmarkController() {
   const initialRoute = useMemo(() => readBenchRoute(), []);
@@ -60,9 +62,9 @@ export function useBenchmarkController() {
   const systemPromptByBenchmark = useBenchmarkDefaults();
   const form = useBenchForm(systemPromptByBenchmark);
   const {
-    benchmark, baseUrl, apiKey, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
+    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, sampleLimit, startIndex, testNumbers,
-    systemPrompt, promptTemplate, extraBody, setBenchmark, setBaseUrl, setApiKey, setModel,
+    systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
     setMaxOutputTokens, setThinkingEnabled, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount, setAdaptiveRepetitionPenalty, setRepetitionPenalty,
     setCommentSignalThreshold, setSampleLimit, setStartIndex, setTestNumbers,
     setSystemPrompt, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
@@ -75,6 +77,7 @@ export function useBenchmarkController() {
   const [tokens, setTokens] = useState<TokenEvent[]>([]);
   const [events, setEvents] = useState<EventEnvelope[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { providers, providersLoading, saveProvider, deleteProvider } = useProviders(setError);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (
     typeof window !== "undefined" ? readSidebarCollapsed(window) : false
@@ -115,7 +118,20 @@ export function useBenchmarkController() {
   const selectedRunNotificationsEnabled = selectedRun
     ? notificationsEnabledForRun(selectedRun.id, disabledNotificationRunIds)
     : true;
-  const queueActive = useMemo(() => anyRunLive(runs), [runs]);
+  const selectedProvider = useMemo(
+    () => providers.find((provider) => provider.id === providerId) ?? null,
+    [providerId, providers]
+  );
+  const queueActive = useMemo(
+    () => providerQueueIsActive(runs, selectedProvider),
+    [runs, selectedProvider]
+  );
+
+  useEffect(() => {
+    if (providersLoading) return;
+    if (providers.some((provider) => provider.id === providerId)) return;
+    setProviderId(providers[0]?.id ?? "");
+  }, [providerId, providers, providersLoading, setProviderId]);
 
   // A backend that predates the run queue starts every POSTed run
   // immediately and its summaries carry no queue fields. When the UI promised
@@ -334,8 +350,10 @@ export function useBenchmarkController() {
   function currentRunConfig() {
     return {
       benchmark,
-      baseUrl,
-      apiKey,
+      providerId,
+      // Harmless redundancy for older local servers; current servers resolve
+      // the authoritative URL and key from providerId.
+      baseUrl: selectedProvider?.baseUrl,
       model,
       maxOutputTokens,
       thinkingEnabled,
@@ -386,10 +404,33 @@ export function useBenchmarkController() {
     }
   }
 
-  async function cancelRun() {
+  async function cancelRun(stopMode: RunStopMode) {
     if (!selectedRun || !statusIsLive(selectedRun.status)) return;
-    await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/cancel`, { method: "POST" });
-    await loadRuns();
+    setError(null);
+    try {
+      const stopPath = stopMode === "immediate" ? "cancel" : `stop?mode=${stopMode}`;
+      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/${stopPath}`, { method: "POST" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Failed to stop run");
+      setRuns((previous) => updateRunInPlace(previous, json));
+      await loadRuns();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : String(stopError));
+    }
+  }
+
+  async function cancelStopping() {
+    if (!selectedRun?.requestedStopMode) return;
+    setError(null);
+    try {
+      const response = await fetch(`${BENCH_API}/api/runs/${selectedRun.id}/stop`, { method: "DELETE" });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || "Failed to cancel stopping");
+      setRuns((previous) => updateRunInPlace(previous, json));
+      await loadRuns();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : String(stopError));
+    }
   }
 
   // The queue badge's X. Cancelling a queued run is exactly "take it out of
@@ -477,8 +518,10 @@ export function useBenchmarkController() {
 
   return {
     benchmark,
-    baseUrl,
-    apiKey,
+    providerId,
+    providers,
+    providersLoading,
+    selectedProvider,
     model,
     maxOutputTokens,
     thinkingEnabled,
@@ -515,8 +558,7 @@ export function useBenchmarkController() {
     commentSignalThreshold,
     currentTimeMilliseconds: nowMs,
     setBenchmark,
-    setBaseUrl,
-    setApiKey,
+    setProviderId,
     setModel,
     setMaxOutputTokens,
     setThinkingEnabled,
@@ -541,10 +583,13 @@ export function useBenchmarkController() {
     selectNewBench,
     startRun,
     cancelRun,
+    cancelStopping,
     resumeRun,
     deleteRun,
     removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
+    saveProvider,
+    deleteProvider,
   };
 }

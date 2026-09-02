@@ -6,6 +6,8 @@ import {
   type EventEnvelope
 } from "./benchmark";
 
+export type RunStopMode = "immediate" | "after-task" | "after-pass";
+
 export function pct(value?: number | null) {
   return `${Math.round((value || 0) * 1000) / 10}%`;
 }
@@ -103,7 +105,7 @@ export function progressSegments(run?: BenchRun | null) {
 
 export function formatMs(value?: number) {
   if (!value) return "n/a";
-  if (value < 1000) return `${value}ms`;
+  if (value < 1000) return `${Math.round(value)}ms`;
   if (value >= 60_000) return formatDuration(value);
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}s`;
 }

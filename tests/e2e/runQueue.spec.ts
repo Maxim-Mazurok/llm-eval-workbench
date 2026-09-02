@@ -81,8 +81,16 @@ async function fetchRunStates(): Promise<Map<string, { status: string; queuePosi
   ]));
 }
 
-async function submitRunForm(page: Page, baseUrl: string, model: string, testNumbers: string, buttonName: RegExp) {
-  await page.getByPlaceholder("https://host/v1").fill(baseUrl);
+async function configureLocalProvider(baseUrl: string) {
+  const response = await fetch(`${benchmarkApiUrl}/api/providers/local-default`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Queue test model", baseUrl })
+  });
+  expect(response.ok).toBe(true);
+}
+
+async function submitRunForm(page: Page, model: string, testNumbers: string, buttonName: RegExp) {
   await page.getByPlaceholder("provider/model-name").fill(model);
   // Close the model combobox suggestions so they cannot cover the buttons.
   await page.keyboard.press("Escape");
@@ -95,18 +103,19 @@ function runTab(page: Page, model: string, status: string) {
 }
 
 test("queues a run started from the UI while another is running, then runs it", async ({ page, context }) => {
-  await context.grantPermissions(["notifications"]);
+    await context.grantPermissions(["notifications"]);
   const model = await startModelStub();
   try {
+    await configureLocalProvider(model.baseUrl);
     await page.goto("/");
-    await submitRunForm(page, model.baseUrl, "qa-model", "0", /start run/i);
+    await submitRunForm(page, "qa-model", "0", /start run/i);
     // The first task's model call hangs, so the run stays in progress.
     await expect(runTab(page, "qa-model", "running")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /new bench/i }).click();
     // With a live run, the primary action reads "Add to queue".
     await expect(page.getByRole("button", { name: /add to queue/i })).toBeVisible();
-    await submitRunForm(page, model.baseUrl, "qb-model", "1", /add to queue/i);
+    await submitRunForm(page, "qb-model", "1", /add to queue/i);
 
     // The new run waits in line instead of starting.
     await expect(runTab(page, "qb-model", "queued")).toBeVisible({ timeout: 15_000 });
@@ -141,16 +150,17 @@ test("removes a queued run from the line via its badge and renumbers the rest", 
   await context.grantPermissions(["notifications"]);
   const model = await startModelStub();
   try {
+    await configureLocalProvider(model.baseUrl);
     await page.goto("/");
-    await submitRunForm(page, model.baseUrl, "qc-model", "0", /start run/i);
+    await submitRunForm(page, "qc-model", "0", /start run/i);
     await expect(runTab(page, "qc-model", "running")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /new bench/i }).click();
-    await submitRunForm(page, model.baseUrl, "qd-model", "1", /add to queue/i);
+    await submitRunForm(page, "qd-model", "1", /add to queue/i);
     await expect(page.getByRole("button", { name: "Remove benchmark run qd-model from queue (position 1)" }))
       .toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: /new bench/i }).click();
-    await submitRunForm(page, model.baseUrl, "qe-model", "2", /add to queue/i);
+    await submitRunForm(page, "qe-model", "2", /add to queue/i);
     await expect(page.getByRole("button", { name: "Remove benchmark run qe-model from queue (position 2)" }))
       .toBeVisible({ timeout: 15_000 });
 

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelCombobox } from "./ModelCombobox";
+import { ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
 afterEach(cleanup);
 
@@ -13,9 +13,17 @@ const MODELS = [
   "gpt-oss-20b-MXFP4-Q8"
 ];
 
-function Harness({ models = MODELS, onOpen = () => {} }: { models?: string[]; onOpen?: () => void }) {
+function Harness({
+  models = MODELS,
+  loading = false,
+  onOpen = () => {}
+}: {
+  models?: string[];
+  loading?: boolean;
+  onOpen?: () => void;
+}) {
   const [value, setValue] = useState("");
-  return <ModelCombobox models={models} value={value} onChange={setValue} onOpen={onOpen} />;
+  return <ModelCombobox models={models} loading={loading} value={value} onChange={setValue} onOpen={onOpen} />;
 }
 
 describe("ModelCombobox", () => {
@@ -53,5 +61,26 @@ describe("ModelCombobox", () => {
     await userEvent.type(input, "my-custom-model");
     expect(input).toHaveValue("my-custom-model");
     expect(screen.getByText(/endpoint unreachable/i)).toBeInTheDocument();
+  });
+
+  it("shows loading instead of stale suggestions while a provider changes", async () => {
+    render(<Harness loading />);
+    await userEvent.click(screen.getByRole("combobox"));
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    expect(screen.getByText("Loading models…")).toBeInTheDocument();
+  });
+
+  it("labels known VLM providers by request type", async () => {
+    render(<ProviderCombobox
+      value="gateway"
+      onChange={() => {}}
+      providers={[
+        { id: "agent", name: "VLM Orion", baseUrl: "https://api.vlm.run/v1/openai", hasApiKey: true },
+        { id: "gateway", name: "VLM Gateway", baseUrl: "https://gateway.vlm.run/v1/openai", hasApiKey: true }
+      ]}
+    />);
+    await userEvent.click(screen.getByRole("combobox"));
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Inference")).toBeInTheDocument();
   });
 });

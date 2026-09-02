@@ -8,6 +8,7 @@ import {
   compactResult,
   discardResumeArtifacts,
   extractTextFromDelta,
+  isLocalBaseUrl,
   normalizeBaseUrl,
   normalizeParallelTasks,
   normalizePassCount,
@@ -24,7 +25,9 @@ import {
   runSummary,
   syncRunCountsFromResults
 } from "./domain.mjs";
+import { createProviderStore } from "./providerStore.mjs";
 import { benchmarkSummaries, benchmarks, getBenchmark } from "./benchmarks/registry.mjs";
+import { createLmStudioChatCompletionResponse } from "./lmStudioModel.mjs";
 import { fetchModelResponseWithRetry, throwIfRetryableModelOutput } from "./modelRetry.mjs";
 import {
   detectRepetitionLoop,
@@ -67,22 +70,44 @@ export function createRuntimeServer({
   port = Number(process.env.LLM_EVAL_PORT || 8787),
   performanceLogEnabled = process.env.LLM_EVAL_PERFORMANCE_LOG === "1",
   fetchImplementation = fetch,
-  maxReplayEvents = 5000
+  maxReplayEvents = 5000,
+  providerStore: configuredProviderStore,
+  lmStudioClientFactory
 } = {}) {
   const cacheDir = join(rootDir, ".cache");
+  const configDir = join(rootDir, ".config");
   const runsDir = join(rootDir, "benchmark-runs");
+  const providerStore = configuredProviderStore || createProviderStore({ configDir });
   const runs = new Map();
   const taskLogWriteQueues = new Map();
-  // Only one benchmark run executes at a time (a local model server can't
-  // serve two runs at once without wrecking both runs' timings). Everything
-  // else waits in this FIFO of run ids; queuePosition on each run is the
-  // 1-based place in line that the UI shows as a badge.
-  const runQueue = [];
-  let activeRunId = null;
+  // Each saved remote provider gets an independent FIFO and can benchmark at
+  // the same time as other providers. Every loopback address deliberately
+  // collapses into one shared lane, regardless of port or provider id: two
+  // local model servers competing for the same RAM/GPU is exactly the case we
+  // must never run concurrently.
+  const runQueues = new Map();
+  const activeRunIds = new Map();
+
+  function schedulerKeyForRun(run) {
+    if (isLocalBaseUrl(run.baseUrl)) return "local";
+    if (run.providerId) return `provider:${run.providerId}`;
+    return `endpoint:${run.baseUrl}`;
+  }
+
+  function queueForRun(run) {
+    const key = schedulerKeyForRun(run);
+    let queue = runQueues.get(key);
+    if (!queue) {
+      queue = [];
+      runQueues.set(key, queue);
+    }
+    return { key, queue };
+  }
 
   function syncQueuePositions() {
     for (const run of runs.values()) {
-      const queueIndex = runQueue.indexOf(run.id);
+      const queue = runQueues.get(schedulerKeyForRun(run)) || [];
+      const queueIndex = queue.indexOf(run.id);
       run.queuePosition = queueIndex === -1 ? null : queueIndex + 1;
     }
   }
@@ -90,7 +115,9 @@ export function createRuntimeServer({
   function enqueueRun(run) {
     run.status = "queued";
     run.queuedAt = new Date().toISOString();
-    runQueue.push(run.id);
+    const { key, queue } = queueForRun(run);
+    run.schedulerKey = key;
+    queue.push(run.id);
     syncQueuePositions();
     // A run can wait in line for hours before anything else touches disk, and
     // a restart only restores runs that have artifacts; persist now so a
@@ -103,27 +130,34 @@ export function createRuntimeServer({
   }
 
   function dequeueRun(run) {
-    const queueIndex = runQueue.indexOf(run.id);
-    if (queueIndex !== -1) runQueue.splice(queueIndex, 1);
+    const key = run.schedulerKey || schedulerKeyForRun(run);
+    const queue = runQueues.get(key);
+    const queueIndex = queue?.indexOf(run.id) ?? -1;
+    if (queueIndex !== -1) queue.splice(queueIndex, 1);
+    if (queue?.length === 0 && !activeRunIds.has(key)) runQueues.delete(key);
     syncQueuePositions();
   }
 
   function processQueue() {
-    while (runQueue.length) {
-      // INVARIANT: at most one run executes at a time. The guard sits inside
-      // the loop so that once a run is launched, the next iteration sees the
-      // occupied slot and stops instead of draining the rest of the queue.
-      if (activeRunId) {
-        const activeRun = runs.get(activeRunId);
-        if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) return;
-        activeRunId = null;
+    for (const [key, queue] of runQueues) {
+      const activeRun = runs.get(activeRunIds.get(key));
+      if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) continue;
+      activeRunIds.delete(key);
+
+      let nextRun = null;
+      while (queue.length && !nextRun) {
+        const candidate = runs.get(queue.shift());
+        if (candidate && !candidate.deleted && !candidate.cancelled && candidate.status === "queued") nextRun = candidate;
       }
-      const nextRun = runs.get(runQueue.shift());
       syncQueuePositions();
-      if (!nextRun || nextRun.deleted || nextRun.cancelled || nextRun.status !== "queued") continue;
-      activeRunId = nextRun.id;
+      if (!nextRun) {
+        if (!queue.length) runQueues.delete(key);
+        continue;
+      }
+      activeRunIds.set(key, nextRun.id);
       runBenchmark(nextRun).finally(() => {
-        if (activeRunId === nextRun.id) activeRunId = null;
+        if (activeRunIds.get(key) === nextRun.id) activeRunIds.delete(key);
+        if (!queue.length) runQueues.delete(key);
         processQueue();
       });
     }
@@ -164,7 +198,7 @@ export function createRuntimeServer({
       "content-type": "application/json; charset=utf-8",
       "content-length": String(responseBytes),
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+      "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
       "access-control-allow-headers": "content-type,authorization"
     });
     res.end(serializedPayload);
@@ -320,15 +354,40 @@ export function createRuntimeServer({
       throw new Error(`Model request failed: HTTP ${response.status} ${text.slice(0, 1000)}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
     let output = "";
     let thinking = "";
     let usage = null;
     let finishReason = null;
     let loopDetection = null;
     const lastLoopCheckCharacters = { thinking: 0, output: 0 };
+
+    function consumeCompletionPayload(parsed) {
+      if (parsed.usage) usage = parsed.usage;
+      const choice = parsed.choices?.[0];
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+      // Streaming responses put tokens in `delta`; a few OpenAI-compatible
+      // endpoints accept stream=true but return one ordinary completion with
+      // the text in `message` instead. Treat both shapes identically.
+      const responseParts = [choice?.delta, choice?.message]
+        .filter((part) => part && typeof part === "object");
+      const parts = responseParts.flatMap((part) => extractTextFromDelta(part));
+      for (const part of parts) {
+        if (part.channel === "output") output += part.text;
+        if (part.channel === "thinking") thinking += part.text;
+        appendEvent(run, "token", { taskId: problem.task_id, index, ...context, ...part });
+      }
+      if (!parts.length && responseParts.some((part) => Object.keys(part).length)) {
+        appendEvent(run, "raw-delta", {
+          taskId: problem.task_id,
+          index,
+          ...context,
+          delta: responseParts.length === 1 ? responseParts[0] : responseParts
+        });
+      }
+      const detectedLoop = detectStreamLoop();
+      recordLoopDetection(detectedLoop);
+      return detectedLoop;
+    }
 
     function responseResult() {
       return {
@@ -362,7 +421,49 @@ export function createRuntimeServer({
       });
     }
 
+    // VLM Run currently returns a normal JSON completion despite stream=true.
+    // Check the content type before consuming the ReadableStream as SSE so
+    // charged completions cannot silently become empty benchmark answers.
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const parsed = await response.json();
+      const detectedLoop = consumeCompletionPayload(parsed);
+      recordLoopDetection(detectStreamLoop(true) || detectTokenLimitRepetitionLoop({
+        thinking,
+        output,
+        finishReason
+      }));
+      if (loopDetection && run.adaptiveRepetitionPenalty) return responseResult();
+      throwIfRetryableModelOutput(thinking, output);
+      if (!finishReason) finishReason = "stop";
+      return responseResult();
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
     let receivedDoneMarker = false;
+    function processFrame(frame) {
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        if (payload === "[DONE]") {
+          receivedDoneMarker = true;
+          continue;
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(payload);
+        } catch {
+          appendEvent(run, "raw", { taskId: problem.task_id, index, ...context, text: payload });
+          continue;
+        }
+        const detectedLoop = consumeCompletionPayload(parsed);
+        if (detectedLoop && run.adaptiveRepetitionPenalty) return true;
+      }
+      return false;
+    }
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -370,43 +471,16 @@ export function createRuntimeServer({
       const frames = buffer.split("\n\n");
       buffer = frames.pop() ?? "";
       for (const frame of frames) {
-        for (const line of frame.split("\n")) {
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          if (payload === "[DONE]") {
-            receivedDoneMarker = true;
-            continue;
-          }
-          let parsed;
-          try {
-            parsed = JSON.parse(payload);
-          } catch {
-            appendEvent(run, "raw", { taskId: problem.task_id, index, ...context, text: payload });
-            continue;
-          }
-          if (parsed.usage) usage = parsed.usage;
-          const choice = parsed.choices?.[0];
-          if (choice?.finish_reason) finishReason = choice.finish_reason;
-          const delta = choice?.delta ?? {};
-          const parts = extractTextFromDelta(delta);
-          for (const part of parts) {
-            if (part.channel === "output") output += part.text;
-            if (part.channel === "thinking") thinking += part.text;
-            appendEvent(run, "token", { taskId: problem.task_id, index, ...context, ...part });
-          }
-          if (!parts.length && Object.keys(delta).length) {
-            appendEvent(run, "raw-delta", { taskId: problem.task_id, index, ...context, delta });
-          }
-          const detectedLoop = detectStreamLoop();
-          recordLoopDetection(detectedLoop);
-          if (detectedLoop && run.adaptiveRepetitionPenalty) {
-            await reader.cancel().catch(() => undefined);
-            return responseResult();
-          }
+        if (processFrame(frame) && run.adaptiveRepetitionPenalty) {
+          await reader.cancel().catch(() => undefined);
+          return responseResult();
         }
       }
     }
+    // Some otherwise compatible servers omit the final SSE blank line. Do
+    // not discard a charged completion merely because its last frame arrived
+    // immediately before the connection closed.
+    processFrame(buffer);
     recordLoopDetection(detectStreamLoop(true) || detectTokenLimitRepetitionLoop({
       thinking,
       output,
@@ -485,6 +559,15 @@ export function createRuntimeServer({
       delete body.repetition_penalty;
     }
     if (Number.isFinite(context.repetitionPenalty)) body.repetition_penalty = context.repetitionPenalty;
+    const lmStudioPredictionConfig = {
+      maxTokens: normalizeTokenCount(body.max_tokens, thinkingBudget + run.maxOutputTokens),
+      reasoningBudget: thinkingBudget,
+      enableThinking: run.thinkingEnabled,
+      temperature: Number(body.temperature),
+      ...(Number.isFinite(Number(body.repetition_penalty))
+        ? { repeatPenalty: Number(body.repetition_penalty) }
+        : {})
+    };
 
     appendEvent(run, "prompt", {
       taskId: problem.task_id,
@@ -494,13 +577,25 @@ export function createRuntimeServer({
       ...(Array.isArray(problem.images) && problem.images.length
         ? { imageFiles: problem.images.map((image) => image.file) }
         : {}),
-      request: { ...body, messages }
+      request: run.usesLmStudioSdk
+        ? { transport: "lmstudio-sdk", model: run.model, messages, predictionConfig: lmStudioPredictionConfig }
+        : { ...body, messages }
     });
     const started = Date.now();
     try {
       return await fetchModelResponseWithRetry({
-        fetchImplementation,
-        requestUrl: `${run.baseUrl}/chat/completions`,
+        fetchImplementation: run.usesLmStudioSdk
+          ? () => createLmStudioChatCompletionResponse({
+              baseUrl: run.baseUrl,
+              apiKey: run.apiKey,
+              model: run.model,
+              messages,
+              predictionConfig: lmStudioPredictionConfig,
+              signal: controller.signal,
+              clientFactory: lmStudioClientFactory
+            })
+          : fetchImplementation,
+        requestUrl: run.usesLmStudioSdk ? run.baseUrl : `${run.baseUrl}/chat/completions`,
         requestOptions: {
           method: "POST",
           headers: {
@@ -754,6 +849,7 @@ export function createRuntimeServer({
       async function runWorker(tasks, getNextTaskIndex) {
         while (true) {
           if (run.cancelled) throw new Error("Run cancelled.");
+          if (run.requestedStopMode === "after-task") return;
           const taskIndex = getNextTaskIndex();
           if (taskIndex >= tasks.length) return;
           await runTask(tasks[taskIndex]);
@@ -784,6 +880,13 @@ export function createRuntimeServer({
           return taskIndex;
         };
         await Promise.all(Array.from({ length: workerCount }, () => runWorker(remainingTasks, getNextTaskIndex)));
+        if (run.requestedStopMode === "after-task" || run.requestedStopMode === "after-pass") {
+          const requestedStopMode = run.requestedStopMode;
+          run.cancelled = true;
+          throw new Error(requestedStopMode === "after-task"
+            ? "Run stopped after current task."
+            : "Run stopped after current pass.");
+        }
       }
       run.status = "completed";
       run.finishedAt = new Date().toISOString();
@@ -795,6 +898,7 @@ export function createRuntimeServer({
       persistRunArtifacts(run);
     } catch (error) {
       run.status = run.cancelled ? "cancelled" : "error";
+      run.requestedStopMode = null;
       run.finishedAt = new Date().toISOString();
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
@@ -829,6 +933,49 @@ export function createRuntimeServer({
     } catch {
       return null;
     }
+  }
+
+  async function fetchLmStudioModelInfo(baseUrl, modelId, apiKey) {
+    try {
+      const origin = new URL(baseUrl).origin;
+      const response = await fetchImplementation(`${origin}/api/v1/models`, {
+        signal: AbortSignal.timeout(2000),
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      if (!Array.isArray(payload?.models)) return null;
+      const normalizedModelId = String(modelId || "").trim();
+      return payload.models.find((modelInfo) => (
+        modelInfo?.key === normalizedModelId
+        || modelInfo?.loaded_instances?.some((instance) => instance?.id === normalizedModelId)
+      )) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function usesLmStudioSdkForThinking(baseUrl, modelId, thinkingEnabled, apiKey, providerName) {
+    if (!thinkingEnabled) return false;
+    const namedLmStudioProvider = String(providerName || "").toLowerCase().includes("lm studio");
+    const endpointUrl = new URL(baseUrl);
+    if (!namedLmStudioProvider && (providerName || endpointUrl.port !== "1234")) return false;
+    const modelInfo = await fetchLmStudioModelInfo(baseUrl, modelId, apiKey);
+    if (!modelInfo) {
+      if (!namedLmStudioProvider) return false;
+      throw new Error(
+        `Could not verify model "${modelId}" through LM Studio's model metadata API. `
+        + "Make sure LM Studio is running, the model is loaded, and its server is up to date."
+      );
+    }
+    if (modelInfo.format !== "gguf") {
+      throw new Error(
+        `Model "${modelId}" is loaded in LM Studio as ${modelInfo.format || "an unknown format"}. `
+        + "Numeric reasoning budgets require a GGUF model on the llama.cpp runtime. "
+        + "Load the GGUF variant or turn off thinking."
+      );
+    }
+    return true;
   }
 
   // A text-only model does not error on image parts — oMLX silently drops
@@ -879,16 +1026,42 @@ export function createRuntimeServer({
     }
   }
 
+  async function resolveProviderConfig(config, run = null) {
+    const providerId = String(config.providerId ?? run?.providerId ?? "").trim();
+    if (!providerId) {
+      return {
+        providerId: null,
+        providerName: null,
+        baseUrl: normalizeBaseUrl(config.baseUrl ?? run?.baseUrl),
+        apiKey: String(config.apiKey ?? run?.apiKey ?? "").trim()
+      };
+    }
+    const provider = await providerStore.resolve(providerId);
+    return {
+      providerId: provider.id,
+      providerName: provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey
+    };
+  }
+
   async function createRun(config) {
-    const baseUrl = normalizeBaseUrl(config.baseUrl);
+    const { baseUrl, apiKey, providerId, providerName } = await resolveProviderConfig(config);
     const benchmark = getBenchmark(config.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
-    await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems, config.apiKey);
+    await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems, apiKey);
     await assertVlmRunModelSupportsThinking(
       baseUrl,
       config.model,
       config.thinkingEnabled !== false,
-      config.apiKey
+      apiKey
+    );
+    const usesLmStudioSdk = await usesLmStudioSdkForThinking(
+      baseUrl,
+      config.model,
+      config.thinkingEnabled !== false,
+      apiKey,
+      providerName
     );
     const selectedIndices = parseTestNumbers(config.testNumbers, allProblems.length, benchmark.taskIdPattern);
     const adaptiveRepetitionPenalty = Boolean(config.adaptiveRepetitionPenalty);
@@ -916,8 +1089,11 @@ export function createRuntimeServer({
       benchmark: benchmark.id,
       benchmarkDataRevision: benchmark.dataRevision || null,
       model: String(config.model || "").trim(),
+      providerId,
+      providerName,
       baseUrl,
-      apiKey: String(config.apiKey || "").trim(),
+      apiKey,
+      usesLmStudioSdk,
       temperature: Number(config.temperature ?? 0),
       maxOutputTokens: normalizeTokenCount(config.maxOutputTokens, 2048),
       thinkingEnabled: config.thinkingEnabled !== false,
@@ -936,6 +1112,8 @@ export function createRuntimeServer({
       currentRepetitionPenalty: initialRepetitionPenalty(repetitionPenalty, config.extraBody),
       knownLoopingPenalty: null,
       publicConfig: {
+        providerId,
+        providerName,
         baseUrl,
         benchmark: benchmark.id,
         model: String(config.model || "").trim(),
@@ -946,7 +1124,7 @@ export function createRuntimeServer({
         timeoutSeconds: Number(config.timeoutSeconds ?? 15),
         parallelTasks,
         passCount,
-        apiKey: redactApiKey(config.apiKey, baseUrl),
+        apiKey: redactApiKey(apiKey, baseUrl),
         sampleLimit,
         startIndex,
         testNumbers: String(config.testNumbers || ""),
@@ -969,6 +1147,7 @@ export function createRuntimeServer({
       eventSeq: 0,
       clients: new Set(),
       cancelled: false,
+      requestedStopMode: null,
       abortController: null,
       abortControllers: new Set()
     };
@@ -988,7 +1167,7 @@ export function createRuntimeServer({
   async function applyResumeConfig(run, config) {
     const benchmark = getBenchmark(config.benchmark ?? run.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
-    const baseUrl = normalizeBaseUrl(config.baseUrl ?? run.baseUrl);
+    const { baseUrl, apiKey, providerId, providerName } = await resolveProviderConfig(config, run);
     const adaptiveRepetitionPenalty = config.adaptiveRepetitionPenalty === undefined
       ? run.adaptiveRepetitionPenalty
       : Boolean(config.adaptiveRepetitionPenalty);
@@ -1018,7 +1197,9 @@ export function createRuntimeServer({
     run.benchmark = benchmark.id;
     if (benchmarkChanged) run.benchmarkDataRevision = benchmark.dataRevision || null;
     run.baseUrl = baseUrl;
-    run.apiKey = String(config.apiKey ?? run.apiKey ?? "").trim();
+    run.apiKey = apiKey;
+    run.providerId = providerId;
+    run.providerName = providerName;
     run.model = String(config.model ?? run.model ?? "").trim();
     run.temperature = Number(config.temperature ?? run.temperature ?? 0);
     run.maxOutputTokens = normalizeTokenCount(config.maxOutputTokens ?? run.maxOutputTokens, 2048);
@@ -1045,6 +1226,8 @@ export function createRuntimeServer({
     }
     run.total = effectiveSelectedIndices.length * passCount;
     run.publicConfig = {
+      providerId,
+      providerName,
       baseUrl,
       benchmark: benchmark.id,
       model: run.model,
@@ -1055,7 +1238,7 @@ export function createRuntimeServer({
       timeoutSeconds: run.timeoutSeconds,
       parallelTasks,
       passCount,
-      apiKey: redactApiKey(run.apiKey, baseUrl),
+      apiKey: redactApiKey(apiKey, baseUrl),
       sampleLimit,
       startIndex,
       testNumbers,
@@ -1077,6 +1260,13 @@ export function createRuntimeServer({
     const benchmark = getBenchmark(run.benchmark);
     const problems = await loadBenchmarkProblems(benchmark);
     await assertModelCanSeeImages(run.baseUrl, run.model, benchmark, problems, run.apiKey);
+    run.usesLmStudioSdk = await usesLmStudioSdkForThinking(
+      run.baseUrl,
+      run.model,
+      run.thinkingEnabled,
+      run.apiKey,
+      run.providerName
+    );
   }
 
   function resumeRun(run) {
@@ -1094,6 +1284,7 @@ export function createRuntimeServer({
       );
     }
     run.cancelled = false;
+    run.requestedStopMode = null;
     run.finishedAt = null;
     run.activeTaskIds = [];
     run.activeTaskStartedAt = {};
@@ -1118,6 +1309,19 @@ export function createRuntimeServer({
         const resultsRaw = await fs.readFile(join(dir, "results.json"), "utf8").catch(() => "[]");
         const results = JSON.parse(resultsRaw);
         const persistedRuntimeConfig = runtimeConfigFromPersistedRun(persisted);
+        if (persistedRuntimeConfig.providerId) {
+          try {
+            const provider = await providerStore.resolve(persistedRuntimeConfig.providerId);
+            persistedRuntimeConfig.providerName = provider.name;
+            persistedRuntimeConfig.baseUrl = provider.baseUrl;
+            persistedRuntimeConfig.apiKey = provider.apiKey;
+          } catch (error) {
+            // Keep the run visible even when its provider was removed. Resume
+            // will explain that the saved provider must be recreated/selected.
+            persistedRuntimeConfig.apiKey = "";
+            persistedRuntimeConfig.providerError = error instanceof Error ? error.message : String(error);
+          }
+        }
         const run = {
           ...persisted,
           ...persistedRuntimeConfig,
@@ -1162,6 +1366,37 @@ export function createRuntimeServer({
       if (req.method === "GET" && url.pathname === "/api/benchmarks") {
         return sendJson(res, 200, { benchmarks: benchmarkSummaries() });
       }
+      if (req.method === "GET" && url.pathname === "/api/providers") {
+        return sendJson(res, 200, { providers: await providerStore.list() });
+      }
+      if (req.method === "POST" && url.pathname === "/api/providers") {
+        try {
+          const provider = await providerStore.save(await readJsonBody(req));
+          return sendJson(res, 201, { provider });
+        } catch (error) {
+          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      const providerMatch = url.pathname.match(/^\/api\/providers\/([^/]+)$/);
+      if (providerMatch && req.method === "PUT") {
+        try {
+          const provider = await providerStore.save(
+            await readJsonBody(req),
+            decodeURIComponent(providerMatch[1])
+          );
+          return sendJson(res, 200, { provider });
+        } catch (error) {
+          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      if (providerMatch && req.method === "DELETE") {
+        try {
+          const removed = await providerStore.remove(decodeURIComponent(providerMatch[1]));
+          return sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: "Provider not found." });
+        } catch (error) {
+          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
       // Serve benchmark-owned binary assets (e.g. dataset photographs) so the
       // UI can show exactly what was sent to the model. The benchmark decides
       // which names are legal and where they live; anything it declines is a
@@ -1194,19 +1429,25 @@ export function createRuntimeServer({
       // pre-filter models for image benchmarks — a non-vision model simply
       // fails the run with the server's own error.
       if (req.method === "GET" && url.pathname === "/api/models") {
-        const rawBaseUrl = url.searchParams.get("baseUrl") || "";
-        if (!rawBaseUrl.trim()) {
-          return sendJson(res, 400, { error: "baseUrl query parameter is required" });
-        }
+        const providerId = url.searchParams.get("providerId") || "";
         let baseUrl;
+        let apiKey;
         try {
-          baseUrl = normalizeBaseUrl(rawBaseUrl);
-        } catch {
-          return sendJson(res, 400, { error: "baseUrl is not a valid URL" });
+          if (providerId) {
+            const provider = await providerStore.resolve(providerId);
+            baseUrl = provider.baseUrl;
+            apiKey = provider.apiKey;
+          } else {
+            const rawBaseUrl = url.searchParams.get("baseUrl") || "";
+            if (!rawBaseUrl.trim()) {
+              return sendJson(res, 400, { error: "providerId query parameter is required" });
+            }
+            baseUrl = normalizeBaseUrl(rawBaseUrl);
+            apiKey = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+          }
+        } catch (error) {
+          return sendJson(res, 400, { error: error instanceof Error ? error.message : "Provider is not valid." });
         }
-        // The UI forwards the API key as a bearer token rather than a query
-        // parameter so it never lands in server access logs or browser history.
-        const apiKey = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
         try {
           const upstream = await fetchImplementation(`${baseUrl}/models`, {
             signal: AbortSignal.timeout(3000),
@@ -1258,7 +1499,7 @@ export function createRuntimeServer({
         const run = await createRun(body);
         return sendJson(res, 201, runSummary(run), { endpoint: "create-run", runId: run.id, resultCount: run.results.length });
       }
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(events|cancel|resume))?$/);
+      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(events|cancel|stop|resume))?$/);
       if (runMatch) {
         const run = runs.get(runMatch[1]);
         if (!run) return sendJson(res, 404, { error: "Run not found" });
@@ -1283,6 +1524,31 @@ export function createRuntimeServer({
             resultCount: run.results.length,
             eventCount: run.events.length
           });
+        }
+        if (req.method === "POST" && runMatch[2] === "stop") {
+          const requestedStopMode = url.searchParams.get("mode");
+          if (!["after-task", "after-pass"].includes(requestedStopMode)) {
+            return sendJson(res, 400, { error: "Unknown stop mode." });
+          }
+          if (run.status !== "running") {
+            return sendJson(res, 409, { error: "Only a running run can stop gracefully." });
+          }
+          run.requestedStopMode = requestedStopMode;
+          appendEvent(run, "stop-requested", {
+            mode: requestedStopMode,
+            summary: runSummary(run, { includeResults: false })
+          });
+          return sendJson(res, 200, runSummary(run, { includeResults: false }));
+        }
+        if (req.method === "DELETE" && runMatch[2] === "stop") {
+          if (run.status !== "running" || !run.requestedStopMode) {
+            return sendJson(res, 409, { error: "Run has no pending stop request." });
+          }
+          run.requestedStopMode = null;
+          appendEvent(run, "stop-cancelled", {
+            summary: runSummary(run, { includeResults: false })
+          });
+          return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
         if (req.method === "POST" && runMatch[2] === "cancel") {
           run.cancelled = true;
@@ -1333,7 +1599,7 @@ export function createRuntimeServer({
     }
   });
 
-  return { server, runs, port, runsDir, cacheDir, loadPersistedRuns };
+  return { server, runs, port, runsDir, cacheDir, configDir, providerStore, loadPersistedRuns };
 }
 
 export async function startRuntimeServer(options = {}) {

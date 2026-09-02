@@ -1,7 +1,7 @@
 import {
+  ChevronDown,
   CircleStop,
   FileText,
-  KeyRound,
   ListPlus,
   PanelLeftClose,
   Play,
@@ -10,25 +10,32 @@ import {
   Settings2,
   TerminalSquare
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
   benchmarkOption,
   type BenchmarkId,
   type BenchRun
 } from "../domain/benchmark";
-import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive } from "../domain/runs";
-import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
+import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive, type RunStopMode } from "../domain/runs";
+import { providerKindLabel, type ProviderConfig } from "../domain/providers";
+import { BenchmarkCombobox, ModelCombobox, ProviderCombobox } from "./ModelCombobox";
 
 export type SidebarConfigProps = {
   benchmark: BenchmarkId;
-  baseUrl: string;
-  apiKey: string;
+  providerId: string;
+  providers: ProviderConfig[];
+  providersLoading: boolean;
+  selectedProvider: ProviderConfig | null;
   model: string;
   /** Model ids from the endpoint's /v1/models, for the combobox suggestions. */
   availableModels: string[];
+  /** True while the selected provider's model list is loading. */
+  availableModelsLoading: boolean;
   /** id → oMLX model_type ("vlm" = vision-capable); empty when unknown. */
   modelTypes: Record<string, string>;
   /** Refetches the model list; called whenever the combobox opens. */
   onRefreshModels: () => void;
+  onManageProviders: () => void;
   maxOutputTokens: number;
   thinkingEnabled: boolean;
   thinkingBudget: number;
@@ -44,16 +51,16 @@ export type SidebarConfigProps = {
   promptTemplate: string;
   extraBody: string;
   selectedRun: BenchRun | null;
-  /** True while any run is live, so start/resume enqueue instead of starting. */
+  /** True while this provider's lane is live; local providers share one lane. */
   queueActive: boolean;
   error: string | null;
   onCollapse: () => void;
   onStartRun: () => void;
-  onCancelRun: () => void;
+  onCancelRun: (stopMode: RunStopMode) => void;
+  onCancelStopping: () => void;
   onResumeRun: () => void;
   setBenchmark: (value: BenchmarkId) => void;
-  setBaseUrl: (value: string) => void;
-  setApiKey: (value: string) => void;
+  setProviderId: (value: string) => void;
   setModel: (value: string) => void;
   setMaxOutputTokens: (value: number) => void;
   setThinkingEnabled: (value: boolean) => void;
@@ -71,8 +78,102 @@ export type SidebarConfigProps = {
   setExtraBody: (value: string) => void;
 };
 
+function StopSplitButton({
+  selectedRun,
+  onCancelRun,
+  onCancelStopping
+}: {
+  selectedRun: BenchRun | null;
+  onCancelRun: (stopMode: RunStopMode) => void;
+  onCancelStopping: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stopDisabled = !statusIsLive(selectedRun?.status);
+  const gracefulStopDisabled = selectedRun?.status !== "running";
+  const requestedStopMode = selectedRun?.requestedStopMode;
+  const stopLabel = requestedStopMode === "after-task"
+    ? "Stopping after task"
+    : requestedStopMode === "after-pass"
+      ? "Stopping after pass"
+      : "Stop";
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (gracefulStopDisabled) setMenuOpen(false);
+  }, [gracefulStopDisabled]);
+
+  function stopAfter(stopMode: RunStopMode) {
+    setMenuOpen(false);
+    onCancelRun(stopMode);
+  }
+
+  return (
+    <div
+      className={requestedStopMode ? "stop-split-button is-stopping" : "stop-split-button"}
+      ref={containerRef}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !menuOpen) return;
+        event.preventDefault();
+        setMenuOpen(false);
+      }}
+    >
+      <button
+        aria-label={requestedStopMode ? stopLabel : "Stop run now"}
+        className="secondary-action stop-split-main"
+        type="button"
+        onClick={() => onCancelRun("immediate")}
+        disabled={stopDisabled || Boolean(requestedStopMode)}
+      >
+        <CircleStop size={17} /> {stopLabel}
+      </button>
+      <button
+        aria-expanded={menuOpen}
+        aria-haspopup="menu"
+        aria-label={menuOpen ? "Hide stop options" : "Show stop options"}
+        className="secondary-action stop-split-toggle"
+        type="button"
+        onClick={() => setMenuOpen((previous) => !previous)}
+        disabled={gracefulStopDisabled}
+      >
+        <ChevronDown size={16} />
+      </button>
+      {menuOpen ? (
+        <div className="stop-options-menu" role="menu">
+          {requestedStopMode ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onCancelStopping();
+              }}
+            >
+              Cancel stopping
+            </button>
+          ) : (
+            <>
+              <button type="button" role="menuitem" onClick={() => stopAfter("after-task")}>After task</button>
+              <button type="button" role="menuitem" onClick={() => stopAfter("after-pass")}>After pass</button>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SidebarConfig(props: SidebarConfigProps) {
   const selectedBenchmark = benchmarkOption(props.benchmark);
+  const providerKind = providerKindLabel(props.selectedProvider?.baseUrl);
   return (
     <aside className="bench-sidebar">
       <div className="bench-title-row">
@@ -110,29 +211,54 @@ export function SidebarConfig(props: SidebarConfigProps) {
           }}
         />
       </label>
-      <label className="field">
-        <span><Server size={14} /> Base URL</span>
-        <input value={props.baseUrl} onChange={(event) => props.setBaseUrl(event.target.value)} placeholder="https://host/v1" />
-      </label>
-      <label className="field">
-        <span><KeyRound size={14} /> API key</span>
-        <input value={props.apiKey} onChange={(event) => props.setApiKey(event.target.value)} type="password" placeholder="optional" />
-      </label>
+      <div className="provider-field-group">
+        <label className="field">
+          <span><Server size={14} /> Provider</span>
+          <ProviderCombobox
+            providers={props.providers}
+            value={props.providerId}
+            onChange={props.setProviderId}
+          />
+        </label>
+        <button className="manage-providers-button" type="button" onClick={props.onManageProviders}>
+          <Settings2 size={15} /> Manage
+        </button>
+      </div>
+      {props.selectedProvider ? (
+        <p className="provider-selection-meta">
+          <span>{props.selectedProvider.baseUrl}</span>
+          <em>{props.selectedProvider.hasApiKey ? "Key secured" : "No key"}</em>
+        </p>
+      ) : !props.providersLoading ? (
+        <button className="provider-empty-action" type="button" onClick={props.onManageProviders}>
+          Add a provider before starting a run
+        </button>
+      ) : null}
       <label className="field">
         <span>Model</span>
         <ModelCombobox
           models={props.availableModels}
+          loading={props.availableModelsLoading}
           placeholder="provider/model-name"
           tags={Object.fromEntries(
             props.availableModels.map((modelId) => [
               modelId,
-              props.modelTypes[modelId] === "vlm" ? "vision" : undefined
+              [
+                providerKind?.toLocaleLowerCase(),
+                props.modelTypes[modelId] === "vlm" ? "vision" : undefined
+              ].filter(Boolean).join(" · ") || undefined
             ])
           )}
           value={props.model}
           onChange={props.setModel}
           onOpen={props.onRefreshModels}
         />
+        {providerKind === "Agent" ? (
+          <small className="field-warning provider-kind-warning">
+            Agent endpoint — Orion adds agent/tool context, so tiny prompts can be billed with substantial input overhead.
+            Use a provider tagged “Inference” for ordinary model benchmarks.
+          </small>
+        ) : null}
         {selectedBenchmark.attachesImages
           && props.modelTypes[props.model.trim()] !== undefined
           && props.modelTypes[props.model.trim()] !== "vlm" ? (
@@ -222,7 +348,7 @@ export function SidebarConfig(props: SidebarConfigProps) {
           title={props.queueActive ? "A run is in progress — this run will wait in the queue" : undefined}
           type="button"
           onClick={props.onStartRun}
-          disabled={!props.model.trim()}
+          disabled={!props.providerId || !props.model.trim()}
         >
           {props.queueActive ? <><ListPlus size={17} /> Add to queue</> : <><Play size={17} /> Start run</>}
         </button>
@@ -235,9 +361,11 @@ export function SidebarConfig(props: SidebarConfigProps) {
         >
           {props.queueActive ? <><ListPlus size={17} /> Queue resume</> : <><RotateCcw size={17} /> Resume</>}
         </button>
-        <button className="secondary-action" type="button" onClick={props.onCancelRun} disabled={!statusIsLive(props.selectedRun?.status)}>
-          <CircleStop size={17} /> Stop selected
-        </button>
+        <StopSplitButton
+          selectedRun={props.selectedRun}
+          onCancelRun={props.onCancelRun}
+          onCancelStopping={props.onCancelStopping}
+        />
       </div>
       {props.error ? <p className="bench-error">{props.error}</p> : null}
     </aside>

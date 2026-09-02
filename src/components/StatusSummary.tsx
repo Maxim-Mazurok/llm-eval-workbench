@@ -16,6 +16,11 @@ export function StatusSummary({
         <div>
           <p>{selectedRun ? selectedRun.status : "idle"}</p>
           <h2>{selectedRun ? selectedRun.model : "Ready for an OpenAI-compatible model"}</h2>
+          {selectedRun?.providerName || selectedRun?.config?.providerName ? (
+            <small className="benchmark-revision">
+              Provider: {selectedRun.providerName ?? selectedRun.config?.providerName}
+            </small>
+          ) : null}
           {selectedRun?.benchmarkDataRevision ? (
             <small className="benchmark-revision">
               {benchmarkOption(runBenchmarkId(selectedRun)).label} · data {selectedRun.benchmarkDataRevision}

@@ -162,8 +162,7 @@ export function runBenchmarkScoring(run?: { benchmark?: string; config?: { bench
 
 export const DEFAULT_FORM_VALUES = {
   benchmark: "humaneval" as BenchmarkId,
-  baseUrl: "http://localhost:8000/v1",
-  apiKey: "",
+  providerId: "",
   model: "",
   maxOutputTokens: 2048,
   thinkingEnabled: true,
@@ -251,6 +250,8 @@ export type BenchRun = {
   benchmark?: string;
   benchmarkDataRevision?: string | null;
   model: string;
+  providerId?: string | null;
+  providerName?: string | null;
   baseUrl: string;
   createdAt: string;
   startedAt?: string | null;
@@ -268,6 +269,7 @@ export type BenchRun = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  requestedStopMode?: "after-task" | "after-pass" | null;
   /** When the run entered the waiting line; null once it has never queued. */
   queuedAt?: string | null;
   /** 1-based place in the waiting line while status is "queued"; null otherwise. */
@@ -275,6 +277,8 @@ export type BenchRun = {
   logDir?: string;
   selectedIndices?: number[];
   config?: {
+    providerId?: string | null;
+    providerName?: string | null;
     baseUrl?: string;
     model?: string;
     benchmark?: string;

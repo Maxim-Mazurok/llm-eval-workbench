@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BENCHMARK_OPTIONS, type BenchmarkId } from "../domain/benchmark";
+import { isLocalProviderUrl, providerKindLabel, type ProviderConfig } from "../domain/providers";
 
 type ComboboxOption = {
   value: string;
@@ -164,6 +165,7 @@ export function ModelCombobox({
   value,
   models,
   tags,
+  loading = false,
   ariaLabel = "Model",
   placeholder,
   onChange,
@@ -173,6 +175,8 @@ export function ModelCombobox({
   models: string[];
   /** Optional right-aligned tag per model id (e.g. "vision" for VLMs). */
   tags?: Record<string, string | undefined>;
+  /** Shows a loading state instead of suggestions from a previous provider. */
+  loading?: boolean;
   ariaLabel?: string;
   placeholder?: string;
   onChange: (nextValue: string) => void;
@@ -183,10 +187,12 @@ export function ModelCombobox({
     <SearchableCombobox
       allowCustomValue
       ariaLabel={ariaLabel}
-      emptyMessage={models.length
+      emptyMessage={loading
+        ? "Loading models…"
+        : models.length
         ? "No models match — free text is fine."
         : "No models listed (endpoint unreachable?) — type the id."}
-      options={models.map((model) => ({ value: model, label: model, tag: tags?.[model] }))}
+      options={loading ? [] : models.map((model) => ({ value: model, label: model, tag: tags?.[model] }))}
       placeholder={placeholder}
       value={value}
       onChange={onChange}
@@ -215,6 +221,33 @@ export function BenchmarkCombobox({
       placeholder={placeholder}
       value={value}
       onChange={(nextValue) => onChange(nextValue as BenchmarkId | "")}
+    />
+  );
+}
+
+export function ProviderCombobox({
+  value,
+  providers,
+  onChange
+}: {
+  value: string;
+  providers: ProviderConfig[];
+  onChange: (nextValue: string) => void;
+}) {
+  return (
+    <SearchableCombobox
+      allowCustomValue={false}
+      ariaLabel="Provider"
+      emptyMessage="No providers match. Use Manage providers to add one."
+      options={providers.map((provider) => ({
+        value: provider.id,
+        label: provider.name,
+        tag: providerKindLabel(provider.baseUrl)
+          ?? (isLocalProviderUrl(provider.baseUrl) ? "local" : new URL(provider.baseUrl).hostname)
+      }))}
+      placeholder="Choose a saved provider"
+      value={value}
+      onChange={onChange}
     />
   );
 }
