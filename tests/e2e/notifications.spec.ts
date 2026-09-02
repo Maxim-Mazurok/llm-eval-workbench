@@ -163,7 +163,7 @@ test("highlights every detected loop cycle in the matching output channel", asyn
 
   await page.goto("/run/loop-run");
   await page.getByRole("button", { name: /HumanEval\/7/i }).click();
-  await page.getByText("Thinking", { exact: true }).click();
+  await page.getByRole("article").getByText("Thinking", { exact: true }).click();
 
   const highlights = page.locator(".loop-highlight");
   await expect(highlights).toHaveCount(6);

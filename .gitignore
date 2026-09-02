@@ -8,6 +8,7 @@ dist/
 # Local benchmark data and downloaded datasets
 benchmark-runs/
 .cache/
+/.config/
 /reports/
 
 # Optional benchmark packs live in their own repositories; only the contract

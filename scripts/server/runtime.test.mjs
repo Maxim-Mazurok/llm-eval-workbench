@@ -71,6 +71,31 @@ function goodModelHandler(req, res, body) {
   sseFrames(res, ["```python\n", `${code}\n`, "```"], { entryPoint });
 }
 
+function nonStreamingGoodModelHandler(req, res, body) {
+  const entryPoint = entryPointFromRequest(body);
+  const code = goodSolutions[entryPoint] || "pass";
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({
+    choices: [{
+      delta: { role: "assistant" },
+      message: { content: `\`\`\`python\n${code}\n\`\`\`` },
+      finish_reason: "stop"
+    }],
+    usage: { completion_tokens: 7 }
+  }));
+}
+
+function finalUndelimitedSseGoodModelHandler(req, res, body) {
+  const entryPoint = entryPointFromRequest(body);
+  const code = goodSolutions[entryPoint] || "pass";
+  res.writeHead(200, { "content-type": "text/event-stream" });
+  res.write(`data: ${JSON.stringify({ choices: [{ delta: { role: "assistant" } }] })}\n\n`);
+  res.end(`data: ${JSON.stringify({
+    choices: [{ delta: { content: `\`\`\`python\n${code}\n\`\`\`` }, finish_reason: "stop" }],
+    usage: { completion_tokens: 7 }
+  })}`);
+}
+
 function loopingModelHandler(req, res) {
   const repeatedCycle = [
     "Reconsider every available choice and compare each stated condition before selecting the final answer",
@@ -114,6 +139,18 @@ function makeHangingModelHandler(hangingResponses) {
     res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`);
     hangingResponses.push(res);
     req.on("close", () => res.end());
+  };
+}
+
+function makeHeldThenGoodModelHandler(heldResponses, heldRequestCount) {
+  let requestCount = 0;
+  return (req, res, body) => {
+    requestCount += 1;
+    if (requestCount <= heldRequestCount) {
+      heldResponses.push(() => goodModelHandler(req, res, body));
+      return;
+    }
+    goodModelHandler(req, res, body);
   };
 }
 
@@ -165,6 +202,38 @@ describe("runtime server", () => {
 
     expect(seenAuthorizationHeaders).toContainEqual(["http://models.test/v1/models", "Bearer sk-live-secret"]);
     expect(seenAuthorizationHeaders).toContainEqual(["http://models.test/admin/api/models", "Bearer sk-live-secret"]);
+  });
+
+  it("resolves model lookup credentials from a saved provider", async () => {
+    const rootDir = await makeRootDir();
+    const seenAuthorizationHeaders = [];
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "openai-main",
+        name: "OpenAI main",
+        baseUrl: "https://models.test/v1",
+        apiKey: "sk-from-vault"
+      })),
+      list: vi.fn(async () => []),
+      save: vi.fn(),
+      remove: vi.fn()
+    };
+    const { apiUrl } = await startRuntime(rootDir, {
+      providerStore,
+      fetchImplementation: async (url, options) => {
+        seenAuthorizationHeaders.push([String(url), options?.headers?.authorization]);
+        if (String(url) === "https://models.test/v1/models") {
+          return new Response(JSON.stringify({ data: [{ id: "vault-model" }] }));
+        }
+        return new Response("not found", { status: 404 });
+      }
+    });
+
+    const payload = await fetch(`${apiUrl}/api/models?providerId=openai-main`).then((response) => response.json());
+
+    expect(payload.models[0].id).toBe("vault-model");
+    expect(providerStore.resolve).toHaveBeenCalledWith("openai-main");
+    expect(seenAuthorizationHeaders).toContainEqual(["https://models.test/v1/models", "Bearer sk-from-vault"]);
   });
 
   it("rejects a non-positive adaptive starting penalty", async () => {
@@ -332,10 +401,8 @@ describe("runtime server", () => {
     expect(model.requests[0].headers.authorization).toBe("Bearer sk-secret");
     expect(model.requests[0].body).toMatchObject({ model: "test-model", stream: true });
     expect(model.requests[0].body).not.toHaveProperty("repetition_penalty");
-    // The model server binds to a local address, so the api key is saved
-    // alongside the run (convenient re-runs on your own machine) and shows up
-    // in the run's config, including the config snapshots embedded in events.
-    expect(detail.config.apiKey).toBe("sk-secret");
+    // Secrets are never returned in run config, including for loopback URLs.
+    expect(detail.config.apiKey).toBe("***");
 
     const runsList = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
     expect(runsList.runs.map((run) => run.id)).toContain(created.id);
@@ -349,10 +416,9 @@ describe("runtime server", () => {
     });
     const resultsJson = JSON.parse(await fs.readFile(join(runDir, "results.json"), "utf8"));
     expect(resultsJson).toHaveLength(2);
-    // ...but the persisted run.json for a local endpoint does carry the real
-    // key, so a resumed or re-run process can reuse it without re-entry.
+    // The persisted artifact contains only a redacted marker.
     const persistedRun = JSON.parse(await fs.readFile(join(runDir, "run.json"), "utf8"));
-    expect(persistedRun.config.apiKey).toBe("sk-secret");
+    expect(persistedRun.config.apiKey).toBe("***");
     const taskLogs = (await fs.readFile(join(runDir, "task-logs.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     const logChannels = new Set(taskLogs.map((entry) => entry.channel));
     for (const channel of ["prompt", "model-output", "thinking-output", "extracted-code"]) {
@@ -371,6 +437,42 @@ describe("runtime server", () => {
     await reader.cancel();
     expect(sseText).toContain("event: run-started");
     expect(sseText).toContain("event: task-finished");
+  });
+
+  it("uses a normal JSON completion when an endpoint ignores stream=true", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([nonStreamingGoodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail.results[0]).toMatchObject({
+      passed: true,
+      rawOutput: expect.stringContaining("def add_one"),
+      usage: { completion_tokens: 7 },
+      finishReason: "stop"
+    });
+    expect(detail.events).toContainEqual(expect.objectContaining({
+      type: "token",
+      data: expect.objectContaining({ channel: "output" })
+    }));
+  });
+
+  it("reads an SSE completion whose final frame has no blank-line delimiter", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([finalUndelimitedSseGoodModelHandler]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail.results[0]).toMatchObject({
+      passed: true,
+      rawOutput: expect.stringContaining("def add_one"),
+      usage: { completion_tokens: 7 },
+      finishReason: "stop"
+    });
   });
 
   it("records failing assertions when the model returns wrong code", async () => {
@@ -624,6 +726,69 @@ describe("runtime server", () => {
     expect(detail.events.some((event) => event.type === "error")).toBe(false);
   }, 15_000);
 
+  it("stops after currently active tasks finish without starting more tasks", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 2)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      parallelTasks: 2,
+      testNumbers: "0-2"
+    });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(2));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-task`, { method: "POST" });
+    expect(stopResponse.ok).toBe(true);
+    heldResponses.forEach((releaseResponse) => releaseResponse());
+
+    const stopped = await waitForStatus(apiUrl, created.id, ["cancelled"]);
+    expect(stopped).toMatchObject({ completed: 2, passed: 2, failed: 0 });
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it("stops after every task in the current pass finishes", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 2)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      parallelTasks: 2,
+      passCount: 2,
+      testNumbers: "0-2"
+    });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(2));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-pass`, { method: "POST" });
+    expect(stopResponse.ok).toBe(true);
+    heldResponses.forEach((releaseResponse) => releaseResponse());
+
+    const stopped = await waitForStatus(apiUrl, created.id, ["cancelled"]);
+    expect(stopped).toMatchObject({ completed: 3, passed: 3, failed: 0 });
+    expect(model.requests).toHaveLength(3);
+  });
+
+  it("cancels a pending graceful stop and continues the run", async () => {
+    const rootDir = await makeRootDir();
+    const heldResponses = [];
+    const model = await startModelServer([makeHeldThenGoodModelHandler(heldResponses, 1)]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, { testNumbers: "0-2" });
+    await vi.waitFor(() => expect(heldResponses).toHaveLength(1));
+
+    const stopResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop?mode=after-task`, { method: "POST" });
+    expect(await stopResponse.json()).toMatchObject({ requestedStopMode: "after-task" });
+    const continueResponse = await fetch(`${apiUrl}/api/runs/${created.id}/stop`, { method: "DELETE" });
+    expect(await continueResponse.json()).toMatchObject({ requestedStopMode: null });
+    heldResponses[0]();
+
+    const completed = await waitForStatus(apiUrl, created.id, ["completed"]);
+    expect(completed).toMatchObject({ completed: 3, passed: 3, requestedStopMode: null });
+    expect(model.requests).toHaveLength(3);
+  });
+
   it("deletes a run and removes its artifacts from disk", async () => {
     const rootDir = await makeRootDir();
     const model = await startModelServer([goodModelHandler]);
@@ -776,7 +941,7 @@ describe("runtime server", () => {
     expect(reloaded.results[0].extractedCode).toBe(goodSolutions.add_one);
   });
 
-  it("keeps a local run's saved api key usable across a restart and resume", async () => {
+  it("reloads a saved provider key from the credential store across restart and resume", async () => {
     const rootDir = await makeRootDir();
     const hangingResponses = [];
     const model = await startModelServer([
@@ -788,18 +953,27 @@ describe("runtime server", () => {
       },
       goodModelHandler
     ]);
-    const first = await startRuntime(rootDir);
+    const providerStore = {
+      resolve: vi.fn(async (id) => {
+        if (id !== "local-secure") throw new Error("Saved provider not found.");
+        return { id, name: "Local secure", baseUrl: model.baseUrl, apiKey: "sk-secret" };
+      }),
+      list: vi.fn(async () => []),
+      save: vi.fn(),
+      remove: vi.fn()
+    };
+    const first = await startRuntime(rootDir, { providerStore });
 
-    const created = await createRun(first.apiUrl, model.baseUrl, { apiKey: "sk-secret", testNumbers: "0" });
+    const created = await createRun(first.apiUrl, model.baseUrl, { providerId: "local-secure", testNumbers: "0" });
     await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
     await fetch(`${first.apiUrl}/api/runs/${created.id}/cancel`, { method: "POST" });
     await waitForStatus(first.apiUrl, created.id, ["cancelled"]);
 
-    // A fresh process reloading the persisted run should see the real key,
-    // not a "***" placeholder, because the model server is on a local address.
-    const second = await startRuntime(rootDir);
+    // A fresh process reloads the key from the credential store, while API
+    // responses and run artifacts remain redacted.
+    const second = await startRuntime(rootDir, { providerStore });
     const reloaded = await fetch(`${second.apiUrl}/api/runs/${created.id}`).then((response) => response.json());
-    expect(reloaded.config.apiKey).toBe("sk-secret");
+    expect(reloaded.config).toMatchObject({ providerId: "local-secure", apiKey: "***" });
 
     const resumed = await fetch(`${second.apiUrl}/api/runs/${created.id}/resume`, { method: "POST" }).then((response) => response.json());
     expect(resumed.status).toBe("queued");
@@ -832,7 +1006,7 @@ describe("runtime server", () => {
     expect(resumed.status).toBe("queued");
     // The field's value replaced the stored key, so the retried request
     // succeeds and the persisted config reflects it (local endpoint).
-    expect(resumed.config.apiKey).toBe("sk-correct");
+    expect(resumed.config.apiKey).toBe("***");
     const resumedDetail = await waitForStatus(apiUrl, created.id, ["completed"]);
     expect(resumedDetail).toMatchObject({ completed: 1, passed: 1, failed: 0 });
     expect(model.requests.at(-1).headers.authorization).toBe("Bearer sk-correct");
@@ -873,6 +1047,238 @@ describe("runtime server", () => {
       chat_template_kwargs: { enable_thinking: false }
     });
   });
+
+  it("uses the LM Studio SDK reasoning budget for GGUF models", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          models: [{ key: "test-model", format: "gguf", loaded_instances: [{ id: "test-model" }] }]
+        }));
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const clientOptions = [];
+    const predictionRequests = [];
+    const lmStudioClientFactory = (options) => {
+      clientOptions.push(options);
+      return {
+        llm: {
+          model: async () => ({
+            respond(messages, predictionConfig) {
+              predictionRequests.push({ messages, predictionConfig });
+              const fragments = [
+                { content: "<think>", tokensCount: 1, reasoningType: "reasoningStartTag" },
+                { content: "plan", tokensCount: 1, reasoningType: "reasoning" },
+                { content: "</think>", tokensCount: 1, reasoningType: "reasoningEndTag" },
+                { content: "```python\ndef add_one(x):\n    return x + 1\n```", tokensCount: 7, reasoningType: "none" }
+              ];
+              return {
+                async *[Symbol.asyncIterator]() {
+                  yield* fragments;
+                },
+                async result() {
+                  return {
+                    stats: {
+                      stopReason: "eosFound",
+                      promptTokensCount: 20,
+                      predictedTokensCount: 10
+                    }
+                  };
+                },
+                async cancel() {}
+              };
+            }
+          })
+        },
+        async [Symbol.asyncDispose]() {}
+      };
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore, lmStudioClientFactory });
+
+    const created = await createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      maxOutputTokens: 700,
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail).toMatchObject({ passed: 1, failed: 0 });
+    expect(detail.results[0]).toMatchObject({
+      rawOutput: "```python\ndef add_one(x):\n    return x + 1\n```",
+      thinkingOutput: "plan",
+      usage: {
+        prompt_tokens: 20,
+        completion_tokens: 10,
+        completion_tokens_details: { reasoning_tokens: 1 }
+      }
+    });
+    expect(clientOptions).toEqual([{ baseUrl: new URL(modelServer.baseUrl).origin.replace("http:", "ws:") }]);
+    expect(predictionRequests[0].predictionConfig).toMatchObject({
+      maxTokens: 1000,
+      reasoningBudget: 300,
+      enableThinking: true,
+      temperature: 0
+    });
+  });
+
+  it("rejects LM Studio MLX models when a numeric thinking budget is enabled", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          models: [{ key: "test-model", format: "mlx", loaded_instances: [{ id: "test-model" }] }]
+        }));
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore });
+
+    await expect(createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    })).rejects.toThrow(
+      'Model "test-model" is loaded in LM Studio as mlx. Numeric reasoning budgets require a GGUF model on the llama.cpp runtime.'
+    );
+  });
+
+  it("rejects unverifiable LM Studio reasoning budgets instead of silently using OpenAI transport", async () => {
+    const rootDir = await makeRootDir();
+    const modelServer = await startModelServer([
+      (request, response) => {
+        response.writeHead(404);
+        response.end();
+      }
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async () => ({
+        id: "lm-studio",
+        name: "LM Studio",
+        baseUrl: modelServer.baseUrl,
+        apiKey: ""
+      })),
+      list: vi.fn(async () => [])
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore });
+
+    await expect(createRun(apiUrl, modelServer.baseUrl, {
+      providerId: "lm-studio",
+      testNumbers: "0",
+      thinkingEnabled: true,
+      thinkingBudget: 300
+    })).rejects.toThrow(
+      'Could not verify model "test-model" through LM Studio\'s model metadata API.'
+    );
+  });
+
+  it("runs different remote providers concurrently but serializes each provider's queue", async () => {
+    const rootDir = await makeRootDir();
+    const starts = [];
+    const releases = [];
+    const providerConfigs = new Map([
+      ["azure", { id: "azure", name: "Azure", baseUrl: "https://azure.test/v1", apiKey: "az-key" }],
+      ["openai", { id: "openai", name: "OpenAI", baseUrl: "https://openai.test/v1", apiKey: "oa-key" }]
+    ]);
+    const providerStore = {
+      resolve: vi.fn(async (id) => {
+        const provider = providerConfigs.get(id);
+        if (!provider) throw new Error("Saved provider not found.");
+        return provider;
+      }),
+      list: vi.fn(async () => []),
+      save: vi.fn(),
+      remove: vi.fn()
+    };
+    const encoder = new TextEncoder();
+    const { apiUrl } = await startRuntime(rootDir, {
+      providerStore,
+      fetchImplementation: async (url, options) => {
+        if (!String(url).endsWith("/chat/completions")) return new Response("not found", { status: 404 });
+        const body = JSON.parse(options.body);
+        const entryPoint = entryPointFromRequest(body);
+        return new Response(new ReadableStream({
+          start(controller) {
+            starts.push(String(url));
+            releases.push(() => {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: `\`\`\`python\n${goodSolutions[entryPoint]}\n\`\`\`` } }] })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`));
+              controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+              controller.close();
+            });
+          }
+        }), { headers: { "content-type": "text/event-stream" } });
+      }
+    });
+
+    const azureFirst = await createRun(apiUrl, "https://ignored.test/v1", { providerId: "azure", testNumbers: "0" });
+    await vi.waitFor(() => expect(starts).toEqual(["https://azure.test/v1/chat/completions"]));
+    const openaiRun = await createRun(apiUrl, "https://ignored.test/v1", { providerId: "openai", testNumbers: "1" });
+    await vi.waitFor(() => expect(starts).toContain("https://openai.test/v1/chat/completions"));
+    const azureSecond = await createRun(apiUrl, "https://ignored.test/v1", { providerId: "azure", testNumbers: "2" });
+
+    expect(openaiRun.queuePosition).toBeNull();
+    expect(azureSecond).toMatchObject({ status: "queued", queuePosition: 1 });
+    expect(starts).toHaveLength(2);
+
+    releases[0]();
+    releases[1]();
+    await waitForStatus(apiUrl, azureFirst.id, ["completed"]);
+    await waitForStatus(apiUrl, openaiRun.id, ["completed"]);
+    await vi.waitFor(() => expect(starts).toHaveLength(3));
+    expect(starts[2]).toBe("https://azure.test/v1/chat/completions");
+    releases[2]();
+    await waitForStatus(apiUrl, azureSecond.id, ["completed"]);
+  }, 15_000);
+
+  it("shares one local execution lane across providers on different ports", async () => {
+    const rootDir = await makeRootDir();
+    const hangingResponses = [];
+    const firstModel = await startModelServer([makeHangingModelHandler(hangingResponses)]);
+    const secondModel = await startModelServer([goodModelHandler]);
+    const providerStore = {
+      resolve: vi.fn(async (id) => id === "local-a"
+        ? { id, name: "Local A", baseUrl: firstModel.baseUrl, apiKey: "" }
+        : { id, name: "Local B", baseUrl: secondModel.baseUrl, apiKey: "" }),
+      list: vi.fn(async () => []),
+      save: vi.fn(),
+      remove: vi.fn()
+    };
+    const { apiUrl } = await startRuntime(rootDir, { providerStore });
+
+    const first = await createRun(apiUrl, firstModel.baseUrl, { providerId: "local-a", testNumbers: "0" });
+    await vi.waitFor(() => expect(hangingResponses).toHaveLength(1));
+    const second = await createRun(apiUrl, secondModel.baseUrl, { providerId: "local-b", testNumbers: "1" });
+
+    expect(second).toMatchObject({ status: "queued", queuePosition: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(secondModel.requests).toHaveLength(0);
+
+    await fetch(`${apiUrl}/api/runs/${first.id}/cancel`, { method: "POST" });
+    await waitForStatus(apiUrl, second.id, ["completed"]);
+    expect(secondModel.requests).toHaveLength(1);
+  }, 15_000);
 
   it("queues new runs behind the active one and starts them strictly one at a time", async () => {
     const rootDir = await makeRootDir();

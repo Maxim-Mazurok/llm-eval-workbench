@@ -74,6 +74,8 @@ export function runSummary(run, { includeResults = true } = {}) {
     benchmark: run.benchmark || "humaneval",
     benchmarkDataRevision: run.benchmarkDataRevision || null,
     model: run.model,
+    providerId: run.providerId || null,
+    providerName: run.providerName || null,
     baseUrl: run.baseUrl,
     createdAt: run.createdAt,
     startedAt: run.startedAt,
@@ -92,6 +94,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     assertionsTotal,
     assertionScore: assertionsTotal ? assertionsPassed / assertionsTotal : 0,
     currentTaskId: run.currentTaskId,
+    requestedStopMode: run.requestedStopMode ?? null,
     // Place in the waiting line while status is "queued"; null once running.
     queuedAt: run.queuedAt ?? null,
     queuePosition: run.queuePosition ?? null,
@@ -119,6 +122,9 @@ export function runtimeConfigFromPersistedRun(persisted) {
   const persistedConfig = persisted.config || persisted.publicConfig || {};
   return {
     benchmark: String(persistedConfig.benchmark ?? persisted.benchmark ?? "humaneval"),
+    providerId: persistedConfig.providerId ?? persisted.providerId ?? null,
+    providerName: persistedConfig.providerName ?? persisted.providerName ?? null,
+    baseUrl: String(persistedConfig.baseUrl ?? persisted.baseUrl ?? ""),
     publicConfig: {
       ...persistedConfig,
       apiKey: redactApiKey(persistedConfig.apiKey, persistedConfig.baseUrl ?? persisted.baseUrl)
@@ -199,10 +205,8 @@ export function discardResumeArtifacts(run) {
   syncRunCountsFromResults(run);
 }
 
-// Local endpoints (a model server on the same machine) never leave the
-// machine, so the API key they were started with is safe to persist and
-// restore on the next run. Anything else is redacted before it touches disk
-// or an /api/runs response.
+// Loopback detection is also used by the scheduler to put every local model
+// server, including different ports, behind one shared concurrency lock.
 export function isLocalBaseUrl(baseUrl) {
   try {
     const hostname = new URL(String(baseUrl || "")).hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -215,7 +219,7 @@ export function isLocalBaseUrl(baseUrl) {
 export function redactApiKey(value, baseUrl) {
   const trimmed = String(value || "").trim();
   if (!trimmed) return "";
-  return isLocalBaseUrl(baseUrl) ? trimmed : "***";
+  return "***";
 }
 
 export function formatRunDirTimestamp(value) {
