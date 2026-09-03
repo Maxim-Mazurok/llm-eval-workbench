@@ -46,6 +46,9 @@ Conclusions:
 
 - 97.6% - 8192 thinking, 2048 output, 1 pass, qwen3.8-27b-uncensored-mlx + VLM MTP Qwen3.8-27B-MTP-4bit block-size 4, 13h32m (failed: 32, 47 - bad example but it followed because no refusal, 116, 145)
 
+### Qwen3.6-35B
+- 97% - 8192 thinking, 2048 output, 1 pass, Qwen3.6-35B-A3B-4bit, 6h43m (failed: 93, 113, 132, 145; timeout: 32 (infinite loop bug + luck-based))
+
 ### gpt-oss-20b
 
 - 96.3% - 8192 thinking, 16384 tokens, 3 passes, gpt-oss-20b-MXFP4-Q8, 2h7m (failed: 10, 103, 106, 127, 145, 147)
