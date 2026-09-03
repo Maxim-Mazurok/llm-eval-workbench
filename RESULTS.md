@@ -49,6 +49,9 @@ Conclusions:
 ### Qwen3.6-35B
 - 97% - 8192 thinking, 2048 output, 1 pass, Qwen3.6-35B-A3B-4bit, 6h43m (failed: 93, 113, 132, 145; timeout: 32 (infinite loop bug + luck-based))
 
+Notes:
+- Didn't see much speedup with Qwen3.6-35B-A3B-MTP-4bit block-size 4, maybe just a few tokens per second on a ~55 tokens per second baseline, could've been noise, needs more testing. RAM is really tight though with both models loaded.
+
 ### gpt-oss-20b
 
 - 96.3% - 8192 thinking, 16384 tokens, 3 passes, gpt-oss-20b-MXFP4-Q8, 2h7m (failed: 10, 103, 106, 127, 145, 147)
