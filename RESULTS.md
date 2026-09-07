@@ -34,13 +34,16 @@ Conclusions:
 
 - [WIP 74/164 42.7%-97.6%] 94.6% - 8192 thinking, 16384 tokens, 1 pass, Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit, 2h17m (failed: 32 (infinite loop), 41 (comment parsed as code), 65, 68)
 - 98.8% - 8192 thinking, 16384 tokens, 3 passes, Qwen3.6-27B-MXFP4, 31h28m (failed, same in all passes: 134 (didn't handle edge case correctly, pretty clearly wrong assumption), 145) (#94 failed if extracting code from thinking)
-- 98.8% - 8192 thinking, 16384 tokens, 1 pass, Qwen3.6-27B-MLX-6bit, 24h8m (failed: 32 (luck-based solution), 145 (tricky requirement misinterpretation); 2nd incomplete pass: 145)
+- 98.8% - 8192 thinking, 16384 tokens, 1 pass, Qwen3.6-27B-MLX-6bit, 24h8m (failed: 32 
+(luck-based solution), 145 (tricky requirement misinterpretation); 2nd incomplete pass: 145)
+- [WIP 33/164 6.5%-99.8%] 97% - 8192+2048 thinking+output (no force), 1 pass, alibaba:qwen3.6:27b:mirai:mirai-m:4 via uzu, 34m40s
 
 Conclusions:
 - Qwen3.6-27B is a very strong model
 - MXFP4 runs 2.5x faster than 6bit and fits much more comfortably on the 32GB MBP M5, same eval accuracy
 - Opus-Distilled quite a bit lower accuracy than base, might be more clever on math since that is what it was distilled on for the most part
 - Gemma-4-31B is very strong, barely fits tho
+- Uzu seems much faster, like 4x, around 34 tokens per second; downside is no thinking budget enforcement, in 2nd task it looped pretty aggressively and quit early, could be quality issue, needs more testing.
 
 ### Qwen3.8-27B
 
