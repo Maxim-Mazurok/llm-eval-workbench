@@ -15,26 +15,34 @@ import { Metric, MetricLines, type MetricLine } from "./Metric";
 export function MetricsPanel({
   selectedRun,
   selectedThinkingStats,
+  selectedBenchmarkMentionStats,
   commentSignalThreshold,
+  benchmarkMentionRegex,
   selectedLiveEstimate,
   selectedPassTiming,
   selectedSpeedStats,
   selectedRunNotificationsEnabled,
   setCommentSignalThreshold,
+  setBenchmarkMentionRegex,
   onCopyNumbers,
   onCopyThinkingNumbers,
+  onCopyBenchmarkMentionNumbers,
   onToggleNotifications
 }: {
   selectedRun: BenchRun | null;
   selectedThinkingStats: { flagged: number; total: number };
+  selectedBenchmarkMentionStats: { flagged: number; total: number };
   commentSignalThreshold: number;
+  benchmarkMentionRegex: string;
   selectedLiveEstimate: { remaining: string; endTime: string; expectedTotal: string } | null;
   selectedPassTiming: CurrentPassTiming | null;
   selectedSpeedStats: { averageTask: string; elapsed: string };
   selectedRunNotificationsEnabled: boolean;
   setCommentSignalThreshold: (value: number) => void;
+  setBenchmarkMentionRegex: (value: string) => void;
   onCopyNumbers: (status: "pass" | "partial" | "fail" | "error" | "loop") => void;
   onCopyThinkingNumbers: (flagged: boolean) => void;
+  onCopyBenchmarkMentionNumbers: (flagged: boolean) => void;
   onToggleNotifications: (run: BenchRun) => void;
 }) {
   const failures = failureStats(selectedRun?.results);
@@ -112,6 +120,27 @@ export function MetricsPanel({
           </label>
         </Metric>
       ) : null}
+      <Metric
+        label="Mentioned benchmark name"
+        value={selectedRun ? `${selectedBenchmarkMentionStats.flagged}/${selectedBenchmarkMentionStats.total}` : "0/0"}
+      >
+        <div className="metric-actions">
+          <button className="metric-action" type="button" onClick={() => onCopyBenchmarkMentionNumbers(true)} disabled={!selectedRun?.results.length}>
+            <ClipboardCopy size={14} /> Copy detected
+          </button>
+          <button className="metric-action" type="button" onClick={() => onCopyBenchmarkMentionNumbers(false)} disabled={!selectedRun?.results.length}>
+            <ClipboardCopy size={14} /> Copy clean
+          </button>
+        </div>
+        <label className="metric-input metric-input-wide">
+          <span>Regex</span>
+          <input
+            value={benchmarkMentionRegex}
+            type="text"
+            onChange={(event) => setBenchmarkMentionRegex(event.target.value)}
+          />
+        </label>
+      </Metric>
       {statusIsInProgress(selectedRun?.status) ? (
         <Metric
           label="Remaining"
