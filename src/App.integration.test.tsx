@@ -265,69 +265,6 @@ describe("App notifications", () => {
       }
       return jsonResponse({ ...baseRun({ status: "queued" }), events: [] });
     });
-
-    it("flags benchmark-name mentions in task rows and metrics", async () => {
-      const mentionedRun = baseRun({
-        status: "completed",
-        completed: 2,
-        passed: 1,
-        failed: 1,
-        assertionsPassed: 1,
-        assertionsTotal: 2,
-        assertionScore: 0.5,
-        results: [
-          {
-            taskId: "HumanEval/0",
-            attemptId: "HumanEval/0::pass-1",
-            passNumber: 1,
-            passTotal: 1,
-            index: 0,
-            entryPoint: "foo",
-            passed: true,
-            tests: [{ source: "assert foo(1) == 1", passed: true }],
-            prompt: "def foo(x):\n    pass",
-            test: "assert foo(1) == 1",
-            rawOutput: "Let's recall exact HumanEval problem before solving it.\n```python\ndef foo(x):\n    return x\n```",
-            extractedCode: "def foo(x):\n    return x"
-          },
-          {
-            taskId: "HumanEval/1",
-            attemptId: "HumanEval/1::pass-1",
-            passNumber: 1,
-            passTotal: 1,
-            index: 1,
-            entryPoint: "bar",
-            passed: false,
-            tests: [{ source: "assert bar(1) == 2", passed: false }],
-            prompt: "def bar(x):\n    pass",
-            test: "assert bar(1) == 2",
-            rawOutput: "```python\ndef bar(x):\n    return x\n```",
-            extractedCode: "def bar(x):\n    return x"
-          }
-        ]
-      });
-      const fetchMock = vi.fn((input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.endsWith("/api/runs")) {
-          return jsonResponse({ runs: [mentionedRun] });
-        }
-        return jsonResponse({ ...mentionedRun, events: [] });
-      });
-      vi.stubGlobal("fetch", fetchMock);
-      window.history.replaceState(null, "", "/run/run-1");
-
-      render(<App />);
-
-      await screen.findByText("HumanEval/0");
-      expect(screen.getByText("Mentioned benchmark name")).toBeInTheDocument();
-      expect(screen.getByText("1/2")).toBeInTheDocument();
-      expect(screen.getByDisplayValue(String.raw`\bhuman[\s_-]*eval\b`)).toBeInTheDocument();
-      expect(screen.getByText(/mentioned benchmark name/)).toBeInTheDocument();
-
-      await userEvent.click(screen.getByText("HumanEval/0"));
-      expect(screen.getByText("Benchmark name mention")).toBeInTheDocument();
-      expect(screen.getByText(/HumanEval problem/)).toBeInTheDocument();
-    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -357,6 +294,69 @@ describe("App notifications", () => {
       temperature: 0,
       extraBody: { top_p: 0.25 }
     });
+  });
+
+  it("flags benchmark-name mentions in task rows and metrics", async () => {
+    const mentionedRun = baseRun({
+      status: "completed",
+      completed: 2,
+      passed: 1,
+      failed: 1,
+      assertionsPassed: 1,
+      assertionsTotal: 2,
+      assertionScore: 0.5,
+      results: [
+        {
+          taskId: "HumanEval/0",
+          attemptId: "HumanEval/0::pass-1",
+          passNumber: 1,
+          passTotal: 1,
+          index: 0,
+          entryPoint: "foo",
+          passed: true,
+          tests: [{ source: "assert foo(1) == 1", passed: true }],
+          prompt: "def foo(x):\n    pass",
+          test: "assert foo(1) == 1",
+          rawOutput: "Let's recall exact HumanEval problem before solving it.\n```python\ndef foo(x):\n    return x\n```",
+          extractedCode: "def foo(x):\n    return x"
+        },
+        {
+          taskId: "HumanEval/1",
+          attemptId: "HumanEval/1::pass-1",
+          passNumber: 1,
+          passTotal: 1,
+          index: 1,
+          entryPoint: "bar",
+          passed: false,
+          tests: [{ source: "assert bar(1) == 2", passed: false }],
+          prompt: "def bar(x):\n    pass",
+          test: "assert bar(1) == 2",
+          rawOutput: "```python\ndef bar(x):\n    return x\n```",
+          extractedCode: "def bar(x):\n    return x"
+        }
+      ]
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/runs")) {
+        return jsonResponse({ runs: [mentionedRun] });
+      }
+      return jsonResponse({ ...mentionedRun, events: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(null, "", "/run/run-1");
+
+    render(<App />);
+
+    await screen.findByText("HumanEval/0");
+    expect(screen.getByText("Mentioned benchmark name")).toBeInTheDocument();
+    expect(screen.getAllByText("1/2").length).toBeGreaterThan(0);
+    expect(screen.getByDisplayValue(String.raw`\bhuman[\s_-]*eval\b`)).toBeInTheDocument();
+    expect(screen.getByText(/mentioned benchmark name/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("HumanEval/0"));
+    expect(screen.getByText("Benchmark name mention")).toBeInTheDocument();
+    expect(screen.getAllByText(/HumanEval problem/).length).toBeGreaterThan(0);
   });
 
   it("shows and copies looping tasks separately", async () => {

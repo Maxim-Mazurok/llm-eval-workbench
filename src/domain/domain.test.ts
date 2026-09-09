@@ -14,6 +14,8 @@ import {
 } from "./benchmarkMentions";
 import {
   benchmarkMentionPatternForId,
+} from "./benchmark";
+import {
   analyzeThinkingComments,
   commentSignalIsFlagged,
   formatCommentSignal,
