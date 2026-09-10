@@ -228,6 +228,8 @@ describe("App bbeh benchmark", () => {
     // The qa metrics drop code-only panels and rename assertion labels.
     expect(screen.getAllByText("Answer checks").length).toBeGreaterThan(0);
     expect(screen.queryByText("Thinking in comments")).not.toBeInTheDocument();
+    expect(screen.getByText("Mentioned benchmark name")).toBeInTheDocument();
+    expect(screen.getAllByText("0/2").length).toBeGreaterThan(0);
     expect(screen.getByText("1/2 (50%)")).toBeInTheDocument();
 
     await userEvent.click(screen.getByText("bbeh_mini/1"));

@@ -40,6 +40,7 @@ export default function App() {
     selectedScoreRange,
     selectedProgressSegments,
     selectedThinkingStats,
+    selectedBenchmarkMentionStats,
     selectedRunNotificationsEnabled,
     selectedLiveEstimate,
     selectedPassTiming,
@@ -52,6 +53,7 @@ export default function App() {
     sidebarCollapsed,
     selectedPassByTask,
     commentSignalThreshold,
+    benchmarkMentionRegex,
     currentTimeMilliseconds,
     setBenchmark,
     setProviderId,
@@ -74,6 +76,7 @@ export default function App() {
     setSidebarCollapsed,
     setSelectedPassByTask,
     setCommentSignalThreshold,
+    setBenchmarkMentionRegex,
     toggleNotificationsForRun,
     selectRun,
     selectNewBench,
@@ -85,6 +88,7 @@ export default function App() {
     removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
+    copyBenchmarkMentionNumbers,
     saveProvider,
     deleteProvider,
   } = useBenchmarkController();
@@ -179,14 +183,18 @@ export default function App() {
         <MetricsPanel
           selectedRun={selectedRun}
           selectedThinkingStats={selectedThinkingStats}
+          selectedBenchmarkMentionStats={selectedBenchmarkMentionStats}
           commentSignalThreshold={commentSignalThreshold}
+          benchmarkMentionRegex={benchmarkMentionRegex}
           selectedLiveEstimate={selectedLiveEstimate}
           selectedPassTiming={selectedPassTiming}
           selectedSpeedStats={selectedSpeedStats}
           selectedRunNotificationsEnabled={selectedRunNotificationsEnabled}
           setCommentSignalThreshold={setCommentSignalThreshold}
+          setBenchmarkMentionRegex={setBenchmarkMentionRegex}
           onCopyNumbers={copyNumbers}
           onCopyThinkingNumbers={copyThinkingNumbers}
+          onCopyBenchmarkMentionNumbers={copyBenchmarkMentionNumbers}
           onToggleNotifications={toggleNotificationsForRun}
         />
         <PassVariabilityChart run={selectedRun} currentPass={selectedPassTiming} />
@@ -198,6 +206,7 @@ export default function App() {
           expanded={expanded}
           selectedPassByTask={selectedPassByTask}
           commentSignalThreshold={commentSignalThreshold}
+          benchmarkMentionRegex={benchmarkMentionRegex}
           currentTimeMilliseconds={currentTimeMilliseconds}
           setExpanded={setExpanded}
           setSelectedPassByTask={setSelectedPassByTask}

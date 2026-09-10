@@ -10,6 +10,8 @@ import type { AddressInfo } from "node:net";
 
 const benchmarkApiUrl = process.env.PLAYWRIGHT_BENCH_API_URL || "http://localhost:8787";
 
+test.describe.configure({ mode: "serial" });
+
 const solutions: Record<string, string> = {
   add_one: "def add_one(x):\n    return x + 1",
   double: "def double(x):\n    return x * 2",
@@ -103,7 +105,7 @@ function runTab(page: Page, model: string, status: string) {
 }
 
 test("queues a run started from the UI while another is running, then runs it", async ({ page, context }) => {
-    await context.grantPermissions(["notifications"]);
+  await context.grantPermissions(["notifications"]);
   const model = await startModelStub();
   try {
     await configureLocalProvider(model.baseUrl);
@@ -132,7 +134,7 @@ test("queues a run started from the UI while another is running, then runs it", 
 
     // Stopping the active run promotes the queued one automatically.
     await runTab(page, "qa-model", "running").click();
-    await page.getByRole("button", { name: /stop selected/i }).click();
+    await page.getByRole("button", { name: /stop run now/i }).click();
     await expect(runTab(page, "qb-model", "completed")).toBeVisible({ timeout: 30_000 });
     // Exactly one model conversation per run: the hanging one, then the
     // promoted run's — never a third, never a duplicate.
@@ -184,7 +186,7 @@ test("removes a queued run from the line via its badge and renumbers the rest", 
     // Drain the queue: stop the active run; the remaining queued run finishes
     // and the removed run never gets a model call.
     await runTab(page, "qc-model", "running").click();
-    await page.getByRole("button", { name: /stop selected/i }).click();
+    await page.getByRole("button", { name: /stop run now/i }).click();
     await expect(runTab(page, "qe-model", "completed")).toBeVisible({ timeout: 30_000 });
     expect(model.chatRequestCount()).toBe(2);
   } finally {

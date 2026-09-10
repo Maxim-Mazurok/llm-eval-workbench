@@ -9,6 +9,10 @@ import {
   writeRunNotificationPreference
 } from "../notifications";
 import {
+  benchmarkMentionResultNumbers,
+  benchmarkMentionStats
+} from "../domain/benchmarkMentions";
+import {
   BENCH_API,
   SIDEBAR_COLLAPSED_STORAGE_KEY,
   readBenchRoute,
@@ -63,10 +67,10 @@ export function useBenchmarkController() {
   const form = useBenchForm(systemPromptByBenchmark);
   const {
     benchmark, providerId, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
-    passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, sampleLimit, startIndex, testNumbers,
+    passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, benchmarkMentionRegex, sampleLimit, startIndex, testNumbers,
     systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
     setMaxOutputTokens, setThinkingEnabled, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount, setAdaptiveRepetitionPenalty, setRepetitionPenalty,
-    setCommentSignalThreshold, setSampleLimit, setStartIndex, setTestNumbers,
+    setCommentSignalThreshold, setBenchmarkMentionRegex, setSampleLimit, setStartIndex, setTestNumbers,
     setSystemPrompt, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
   } = form;
   const [runs, setRuns] = useState<BenchRun[]>([]);
@@ -114,6 +118,10 @@ export function useBenchmarkController() {
   const selectedThinkingStats = useMemo(
     () => thinkingInCommentsStats(selectedRun?.results ?? [], commentSignalThreshold),
     [commentSignalThreshold, selectedRun]
+  );
+  const selectedBenchmarkMentionStats = useMemo(
+    () => benchmarkMentionStats(selectedRun?.results ?? [], benchmarkMentionRegex),
+    [benchmarkMentionRegex, selectedRun]
   );
   const selectedRunNotificationsEnabled = selectedRun
     ? notificationsEnabledForRun(selectedRun.id, disabledNotificationRunIds)
@@ -363,6 +371,7 @@ export function useBenchmarkController() {
       passCount: normalizePassCount(passCount),
       adaptiveRepetitionPenalty,
       repetitionPenalty,
+      benchmarkMentionRegex,
       sampleLimit,
       startIndex,
       testNumbers,
@@ -516,6 +525,11 @@ export function useBenchmarkController() {
     await navigator.clipboard.writeText(text);
   }
 
+  async function copyBenchmarkMentionNumbers(flagged: boolean) {
+    const text = benchmarkMentionResultNumbers(selectedRun, flagged, benchmarkMentionRegex);
+    await navigator.clipboard.writeText(text);
+  }
+
   return {
     benchmark,
     providerId,
@@ -544,6 +558,7 @@ export function useBenchmarkController() {
     selectedScoreRange,
     selectedProgressSegments,
     selectedThinkingStats,
+    selectedBenchmarkMentionStats,
     selectedRunNotificationsEnabled,
     selectedLiveEstimate,
     selectedPassTiming,
@@ -556,6 +571,7 @@ export function useBenchmarkController() {
     sidebarCollapsed,
     selectedPassByTask,
     commentSignalThreshold,
+    benchmarkMentionRegex,
     currentTimeMilliseconds: nowMs,
     setBenchmark,
     setProviderId,
@@ -578,6 +594,7 @@ export function useBenchmarkController() {
     setSidebarCollapsed,
     setSelectedPassByTask,
     setCommentSignalThreshold,
+    setBenchmarkMentionRegex,
     toggleNotificationsForRun,
     selectRun,
     selectNewBench,
@@ -589,6 +606,7 @@ export function useBenchmarkController() {
     removeRunFromQueue,
     copyNumbers,
     copyThinkingNumbers,
+    copyBenchmarkMentionNumbers,
     saveProvider,
     deleteProvider,
   };

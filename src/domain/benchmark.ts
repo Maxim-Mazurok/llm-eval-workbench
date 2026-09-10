@@ -46,6 +46,7 @@ export type BenchmarkOption = {
   label: string;
   kind: BenchmarkKind;
   scoring?: BenchmarkScoring;
+  benchmarkMentionPattern?: string;
   /** True when every task ships photographs — needs a vision-capable model. */
   attachesImages?: boolean;
   /**
@@ -92,6 +93,7 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
     id: "humaneval",
     label: "HumanEval (code)",
     kind: "code",
+    benchmarkMentionPattern: String.raw`\bhuman[\s_-]*eval\b`,
     taskIdIndexPattern: /^HumanEval\/(\d+)$/i,
     datasetSize: 164,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -103,6 +105,7 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
     id: "bbeh-mini",
     label: "BBEH Mini (corrected)",
     kind: "qa",
+    benchmarkMentionPattern: String.raw`\bbbeh\b|\bbig[\s_-]*bench[\s_-]*extra[\s_-]*hard\b`,
     taskIdIndexPattern: /^bbeh_mini\/(\d+)$/i,
     datasetSize: 460,
     systemPrompt: BBEH_SYSTEM_PROMPT,
@@ -114,6 +117,7 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
     id: "bbeh-mini-official",
     label: "BBEH Mini (official data)",
     kind: "qa",
+    benchmarkMentionPattern: String.raw`\bbbeh\b|\bbig[\s_-]*bench[\s_-]*extra[\s_-]*hard\b`,
     taskIdIndexPattern: /^bbeh_mini\/(\d+)$/i,
     datasetSize: 460,
     systemPrompt: BBEH_SYSTEM_PROMPT,
@@ -125,6 +129,7 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
     id: "bbeh-full",
     label: "BBEH Full (corrected)",
     kind: "qa",
+    benchmarkMentionPattern: String.raw`\bbbeh\b|\bbig[\s_-]*bench[\s_-]*extra[\s_-]*hard\b`,
     datasetSize: 4520,
     systemPrompt: BBEH_SYSTEM_PROMPT,
     promptTemplate: BBEH_PROMPT_TEMPLATE,
@@ -135,6 +140,7 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
     id: "bbeh-full-official",
     label: "BBEH Full (official data)",
     kind: "qa",
+    benchmarkMentionPattern: String.raw`\bbbeh\b|\bbig[\s_-]*bench[\s_-]*extra[\s_-]*hard\b`,
     datasetSize: 4520,
     systemPrompt: BBEH_SYSTEM_PROMPT,
     promptTemplate: BBEH_PROMPT_TEMPLATE,
@@ -145,7 +151,32 @@ export const BENCHMARK_OPTIONS: BenchmarkOption[] = [
 ];
 
 export function benchmarkOption(benchmarkId?: string | null): BenchmarkOption {
-  return BENCHMARK_OPTIONS.find((option) => option.id === benchmarkId) ?? BENCHMARK_OPTIONS[0];
+  return findBenchmarkOption(benchmarkId) ?? BENCHMARK_OPTIONS[0];
+}
+
+export function findBenchmarkOption(benchmarkId?: string | null): BenchmarkOption | null {
+  return BENCHMARK_OPTIONS.find((option) => option.id === benchmarkId) ?? null;
+}
+
+function escapeRegex(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function fallbackBenchmarkMentionPattern(benchmarkId?: string | null) {
+  const tokens = String(benchmarkId || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (!tokens.length) {
+    return findBenchmarkOption(DEFAULT_FORM_VALUES.benchmark)?.benchmarkMentionPattern
+      ?? String.raw`\b${escapeRegex(DEFAULT_FORM_VALUES.benchmark)}\b`;
+  }
+  return String.raw`\b${tokens.map(escapeRegex).join(String.raw`[\s_-]*`)}\b`;
+}
+
+export function benchmarkMentionPatternForId(benchmarkId?: string | null) {
+  return findBenchmarkOption(benchmarkId)?.benchmarkMentionPattern
+    ?? fallbackBenchmarkMentionPattern(benchmarkId);
 }
 
 export function runBenchmarkId(run?: { benchmark?: string; config?: { benchmark?: string } } | null): BenchmarkId {
@@ -173,6 +204,7 @@ export const DEFAULT_FORM_VALUES = {
   adaptiveRepetitionPenalty: false,
   repetitionPenalty: 1,
   commentSignalThreshold: 50,
+  benchmarkMentionRegex: String.raw`\bhuman[\s_-]*eval\b`,
   sampleLimit: 0,
   startIndex: 0,
   testNumbers: "",
@@ -295,6 +327,7 @@ export type BenchRun = {
     passCount?: number;
     adaptiveRepetitionPenalty?: boolean;
     repetitionPenalty?: number;
+    benchmarkMentionRegex?: string;
     sampleLimit?: number;
     startIndex?: number;
     extraBody?: Record<string, unknown>;
