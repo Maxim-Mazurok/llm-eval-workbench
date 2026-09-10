@@ -371,6 +371,7 @@ export function useBenchmarkController() {
       passCount: normalizePassCount(passCount),
       adaptiveRepetitionPenalty,
       repetitionPenalty,
+      benchmarkMentionRegex,
       sampleLimit,
       startIndex,
       testNumbers,

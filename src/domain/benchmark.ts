@@ -167,7 +167,10 @@ function fallbackBenchmarkMentionPattern(benchmarkId?: string | null) {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
-  if (!tokens.length) return escapeRegex(DEFAULT_FORM_VALUES.benchmark);
+  if (!tokens.length) {
+    return findBenchmarkOption(DEFAULT_FORM_VALUES.benchmark)?.benchmarkMentionPattern
+      ?? String.raw`\b${escapeRegex(DEFAULT_FORM_VALUES.benchmark)}\b`;
+  }
   return String.raw`\b${tokens.map(escapeRegex).join(String.raw`[\s_-]*`)}\b`;
 }
 
@@ -324,6 +327,7 @@ export type BenchRun = {
     passCount?: number;
     adaptiveRepetitionPenalty?: boolean;
     repetitionPenalty?: number;
+    benchmarkMentionRegex?: string;
     sampleLimit?: number;
     startIndex?: number;
     extraBody?: Record<string, unknown>;

@@ -289,6 +289,7 @@ describe("App notifications", () => {
       parallelTasks: 1,
       passCount: 100,
       adaptiveRepetitionPenalty: true,
+      benchmarkMentionRegex: String.raw`\bhuman[\s_-]*eval\b`,
       systemPrompt: "system",
       promptTemplate: "prompt %problem_code%",
       temperature: 0,
@@ -357,6 +358,17 @@ describe("App notifications", () => {
     await userEvent.click(screen.getByText("HumanEval/0"));
     expect(screen.getByText("Benchmark name mention")).toBeInTheDocument();
     expect(screen.getAllByText(/HumanEval problem/).length).toBeGreaterThan(0);
+
+    const benchmarkMentionMetric = screen.getByText("Mentioned benchmark name").closest(".bench-metric");
+    expect(benchmarkMentionMetric).not.toBeNull();
+    const benchmarkMentionRegexInput = screen.getByDisplayValue(String.raw`\bhuman[\s_-]*eval\b`);
+    await userEvent.clear(benchmarkMentionRegexInput);
+    await userEvent.type(benchmarkMentionRegexInput, "(");
+
+    expect(within(benchmarkMentionMetric as HTMLElement).getByText("Invalid")).toBeInTheDocument();
+    expect(screen.getByText("Invalid regular expression")).toBeInTheDocument();
+    expect(within(benchmarkMentionMetric as HTMLElement).getByRole("button", { name: "Copy detected" })).toBeDisabled();
+    expect(within(benchmarkMentionMetric as HTMLElement).getByRole("button", { name: "Copy clean" })).toBeDisabled();
   });
 
   it("shows and copies looping tasks separately", async () => {

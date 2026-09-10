@@ -90,7 +90,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setPassCount(normalizePassCount(Number(config.passCount ?? 1)));
     setAdaptiveRepetitionPenaltyState(Boolean(config.adaptiveRepetitionPenalty));
     setRepetitionPenalty(Number(config.repetitionPenalty ?? config.extraBody?.repetition_penalty ?? 1));
-    setBenchmarkMentionRegex(benchmarkMentionPatternForId(option.id));
+    setBenchmarkMentionRegex(String(config.benchmarkMentionRegex ?? benchmarkMentionPatternForId(option.id)));
     setSampleLimit(Number(config.sampleLimit ?? 0));
     setStartIndex(Number(config.startIndex ?? 0));
     setTestNumbers(String(config.testNumbers ?? ""));

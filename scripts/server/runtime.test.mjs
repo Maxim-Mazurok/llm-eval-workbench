@@ -918,7 +918,11 @@ describe("runtime server", () => {
     const model = await startModelServer([goodModelHandler]);
     const first = await startRuntime(rootDir);
 
-    const created = await createRun(first.apiUrl, model.baseUrl, { testNumbers: "0-1", maxOutputTokens: 999 });
+    const created = await createRun(first.apiUrl, model.baseUrl, {
+      testNumbers: "0-1",
+      maxOutputTokens: 999,
+      benchmarkMentionRegex: String.raw`\bhuman[\s_-]*eval\b`
+    });
     await waitForStatus(first.apiUrl, created.id, ["completed"]);
     // Artifact writes are fire-and-forget; wait for the persisted status.
     const runDirs = await fs.readdir(join(rootDir, "benchmark-runs"));
@@ -936,7 +940,11 @@ describe("runtime server", () => {
       passed: 2,
       model: "test-model"
     });
-    expect(reloaded.config).toMatchObject({ maxOutputTokens: 999, testNumbers: "0-1" });
+    expect(reloaded.config).toMatchObject({
+      maxOutputTokens: 999,
+      testNumbers: "0-1",
+      benchmarkMentionRegex: String.raw`\bhuman[\s_-]*eval\b`
+    });
     expect(reloaded.results).toHaveLength(2);
     expect(reloaded.results[0].extractedCode).toBe(goodSolutions.add_one);
   });

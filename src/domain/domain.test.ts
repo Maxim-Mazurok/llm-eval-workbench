@@ -9,6 +9,7 @@ import {
 import {
   analyzeBenchmarkMention,
   benchmarkMentionIsFlagged,
+  benchmarkMentionRegexIsValid,
   benchmarkMentionStats,
   formatBenchmarkMentionSignal
 } from "./benchmarkMentions";
@@ -456,6 +457,9 @@ describe("prompt and comment analysis", () => {
     expect(benchmarkMentionPatternForId("humaneval")).toBe(String.raw`\bhuman[\s_-]*eval\b`);
     expect(benchmarkMentionPatternForId("bbeh-mini")).toContain(String.raw`\bbbeh\b`);
     expect(benchmarkMentionPatternForId("custom-pack-name")).toBe(String.raw`\bcustom[\s_-]*pack[\s_-]*name\b`);
+    expect(benchmarkMentionPatternForId()).toBe(String.raw`\bhuman[\s_-]*eval\b`);
+    expect(benchmarkMentionRegexIsValid("(")).toBe(false);
+    expect(benchmarkMentionRegexIsValid("")).toBe(false);
   });
 
   it("flags answers that mention the benchmark name", () => {
@@ -467,5 +471,14 @@ describe("prompt and comment analysis", () => {
     expect(signal).toMatchObject({ matchedText: "Human Eval", channel: "output" });
     expect(benchmarkMentionStats([mentioned, clean], benchmarkMentionPatternForId("humaneval"))).toEqual({ flagged: 1, total: 2 });
     expect(formatBenchmarkMentionSignal(signal)).toContain("FLAGGED");
+  });
+
+  it("checks thinking and legacy transcript answer channels", () => {
+    const regex = benchmarkMentionPatternForId("humaneval");
+    const thinkingSignal = analyzeBenchmarkMention(result({ thinkingOutput: "This looks like HumanEval." }), regex);
+    const transcriptSignal = analyzeBenchmarkMention(result({ rawTranscript: "Working through human-eval now." }), regex);
+
+    expect(thinkingSignal).toMatchObject({ matchedText: "HumanEval", channel: "thinking" });
+    expect(transcriptSignal).toMatchObject({ matchedText: "human-eval", channel: "transcript" });
   });
 });

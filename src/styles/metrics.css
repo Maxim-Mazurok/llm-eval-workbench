@@ -133,6 +133,16 @@
   font-size: 12px;
 }
 
+.metric-input input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.metric-input-error {
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .metric-input-wide {
   grid-template-columns: minmax(0, 1fr);
 }
