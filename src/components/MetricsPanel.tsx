@@ -1,5 +1,6 @@
 import { Bell, BellOff, ClipboardCopy } from "lucide-react";
 import { runBenchmarkKind, runBenchmarkScoring, type BenchRun } from "../domain/benchmark";
+import { benchmarkMentionRegexIsValid } from "../domain/benchmarkMentions";
 import type { CurrentPassTiming } from "../domain/passTiming";
 import {
   assertionStats,
@@ -15,29 +16,38 @@ import { Metric, MetricLines, type MetricLine } from "./Metric";
 export function MetricsPanel({
   selectedRun,
   selectedThinkingStats,
+  selectedBenchmarkMentionStats,
   commentSignalThreshold,
+  benchmarkMentionRegex,
   selectedLiveEstimate,
   selectedPassTiming,
   selectedSpeedStats,
   selectedRunNotificationsEnabled,
   setCommentSignalThreshold,
+  setBenchmarkMentionRegex,
   onCopyNumbers,
   onCopyThinkingNumbers,
+  onCopyBenchmarkMentionNumbers,
   onToggleNotifications
 }: {
   selectedRun: BenchRun | null;
   selectedThinkingStats: { flagged: number; total: number };
+  selectedBenchmarkMentionStats: { flagged: number; total: number };
   commentSignalThreshold: number;
+  benchmarkMentionRegex: string;
   selectedLiveEstimate: { remaining: string; endTime: string; expectedTotal: string } | null;
   selectedPassTiming: CurrentPassTiming | null;
   selectedSpeedStats: { averageTask: string; elapsed: string };
   selectedRunNotificationsEnabled: boolean;
   setCommentSignalThreshold: (value: number) => void;
+  setBenchmarkMentionRegex: (value: string) => void;
   onCopyNumbers: (status: "pass" | "partial" | "fail" | "error" | "loop") => void;
   onCopyThinkingNumbers: (flagged: boolean) => void;
+  onCopyBenchmarkMentionNumbers: (flagged: boolean) => void;
   onToggleNotifications: (run: BenchRun) => void;
 }) {
   const failures = failureStats(selectedRun?.results);
+  const hasValidBenchmarkMentionRegex = benchmarkMentionRegexIsValid(benchmarkMentionRegex);
   const isCodeBenchmark = runBenchmarkKind(selectedRun) === "code";
   const isGradedBenchmark = runBenchmarkScoring(selectedRun) === "graded";
   const checksLabel = isCodeBenchmark ? "Assertions" : "Answer checks";
@@ -112,6 +122,34 @@ export function MetricsPanel({
           </label>
         </Metric>
       ) : null}
+      <Metric
+        label="Mentioned benchmark name"
+        value={hasValidBenchmarkMentionRegex
+          ? (selectedRun ? `${selectedBenchmarkMentionStats.flagged}/${selectedBenchmarkMentionStats.total}` : "0/0")
+          : "Invalid"}
+      >
+        <div className="metric-actions">
+          <button className="metric-action" type="button" onClick={() => onCopyBenchmarkMentionNumbers(true)} disabled={!selectedRun?.results.length || !hasValidBenchmarkMentionRegex}>
+            <ClipboardCopy size={14} /> Copy detected
+          </button>
+          <button className="metric-action" type="button" onClick={() => onCopyBenchmarkMentionNumbers(false)} disabled={!selectedRun?.results.length || !hasValidBenchmarkMentionRegex}>
+            <ClipboardCopy size={14} /> Copy clean
+          </button>
+        </div>
+        <label className="metric-input metric-input-wide">
+          <span>Regex</span>
+          <input
+            value={benchmarkMentionRegex}
+            type="text"
+            aria-describedby={hasValidBenchmarkMentionRegex ? undefined : "benchmark-mention-regex-error"}
+            aria-invalid={!hasValidBenchmarkMentionRegex}
+            onChange={(event) => setBenchmarkMentionRegex(event.target.value)}
+          />
+          {!hasValidBenchmarkMentionRegex ? (
+            <small className="metric-input-error" id="benchmark-mention-regex-error">Invalid regular expression</small>
+          ) : null}
+        </label>
+      </Metric>
       {statusIsInProgress(selectedRun?.status) ? (
         <Metric
           label="Remaining"

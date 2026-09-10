@@ -1133,6 +1133,7 @@ export function createRuntimeServer({
         extraBody: config.extraBody && typeof config.extraBody === "object" ? config.extraBody : {},
         adaptiveRepetitionPenalty,
         repetitionPenalty,
+        benchmarkMentionRegex: config.benchmarkMentionRegex == null ? undefined : String(config.benchmarkMentionRegex),
         loopDetectionConfig: LOOP_DETECTION_CONFIG
       },
       total: plannedTaskCount * passCount,
@@ -1247,6 +1248,9 @@ export function createRuntimeServer({
       extraBody: run.extraBody,
       adaptiveRepetitionPenalty,
       repetitionPenalty,
+      benchmarkMentionRegex: config.benchmarkMentionRegex == null
+        ? run.publicConfig?.benchmarkMentionRegex
+        : String(config.benchmarkMentionRegex),
       loopDetectionConfig: LOOP_DETECTION_CONFIG
     };
     syncRunCountsFromResults(run);

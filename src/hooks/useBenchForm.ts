@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  benchmarkMentionPatternForId,
   benchmarkOption,
   DEFAULT_FORM_VALUES,
   type BenchmarkId,
@@ -30,6 +31,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   const [adaptiveRepetitionPenalty, setAdaptiveRepetitionPenaltyState] = useState(DEFAULT_FORM_VALUES.adaptiveRepetitionPenalty);
   const [repetitionPenalty, setRepetitionPenalty] = useState(DEFAULT_FORM_VALUES.repetitionPenalty);
   const [commentSignalThreshold, setCommentSignalThreshold] = useState(DEFAULT_FORM_VALUES.commentSignalThreshold);
+  const [benchmarkMentionRegex, setBenchmarkMentionRegex] = useState(DEFAULT_FORM_VALUES.benchmarkMentionRegex);
   const [sampleLimit, setSampleLimit] = useState(DEFAULT_FORM_VALUES.sampleLimit);
   const [startIndex, setStartIndex] = useState(DEFAULT_FORM_VALUES.startIndex);
   const [testNumbers, setTestNumbers] = useState(DEFAULT_FORM_VALUES.testNumbers);
@@ -47,6 +49,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setBenchmarkState(option.id);
     setSystemPromptEdit(null);
     setPromptTemplate(option.promptTemplate);
+    setBenchmarkMentionRegex(benchmarkMentionPatternForId(option.id));
     setTestNumbers(DEFAULT_FORM_VALUES.testNumbers);
     setStartIndex(DEFAULT_FORM_VALUES.startIndex);
     setSampleLimit(DEFAULT_FORM_VALUES.sampleLimit);
@@ -64,6 +67,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setAdaptiveRepetitionPenaltyState(DEFAULT_FORM_VALUES.adaptiveRepetitionPenalty);
     setRepetitionPenalty(DEFAULT_FORM_VALUES.repetitionPenalty);
     setCommentSignalThreshold(DEFAULT_FORM_VALUES.commentSignalThreshold);
+    setBenchmarkMentionRegex(DEFAULT_FORM_VALUES.benchmarkMentionRegex);
     setSampleLimit(DEFAULT_FORM_VALUES.sampleLimit);
     setStartIndex(DEFAULT_FORM_VALUES.startIndex);
     setTestNumbers(DEFAULT_FORM_VALUES.testNumbers);
@@ -86,6 +90,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setPassCount(normalizePassCount(Number(config.passCount ?? 1)));
     setAdaptiveRepetitionPenaltyState(Boolean(config.adaptiveRepetitionPenalty));
     setRepetitionPenalty(Number(config.repetitionPenalty ?? config.extraBody?.repetition_penalty ?? 1));
+    setBenchmarkMentionRegex(String(config.benchmarkMentionRegex ?? benchmarkMentionPatternForId(option.id)));
     setSampleLimit(Number(config.sampleLimit ?? 0));
     setStartIndex(Number(config.startIndex ?? 0));
     setTestNumbers(String(config.testNumbers ?? ""));
@@ -96,7 +101,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
 
   return {
     benchmark, providerId, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
-    passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, sampleLimit, startIndex, testNumbers,
+    passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, benchmarkMentionRegex, sampleLimit, startIndex, testNumbers,
     systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
     setMaxOutputTokens, setThinkingEnabled, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
     setAdaptiveRepetitionPenalty(value: boolean) {
@@ -104,7 +109,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
       if (value) setParallelTasks(1);
     },
     setRepetitionPenalty,
-    setCommentSignalThreshold, setSampleLimit, setStartIndex, setTestNumbers,
+    setCommentSignalThreshold, setBenchmarkMentionRegex, setSampleLimit, setStartIndex, setTestNumbers,
     setSystemPrompt: setSystemPromptEdit, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
   };
 }
