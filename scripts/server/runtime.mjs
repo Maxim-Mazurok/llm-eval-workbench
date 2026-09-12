@@ -1,7 +1,6 @@
-#!/usr/bin/env node
 import { createServer } from "node:http";
 import { promises as fs } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildPromptMessages,
@@ -503,7 +502,7 @@ export function createRuntimeServer({
     const images = Array.isArray(problem.images) ? problem.images : [];
     if (!images.length) return undefined;
     return images.map((image) => {
-      const file = String(image.file).split("/").pop();
+      const file = basename(String(image.file));
       return {
         file,
         postedAt: image.postedAt ?? null,

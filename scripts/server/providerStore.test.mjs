@@ -57,8 +57,11 @@ describe("provider store", () => {
     const metadata = await fs.readFile(join(configDir, "providers.json"), "utf8");
     expect(metadata).toContain("Azure production");
     expect(metadata).not.toContain("sk-top-secret");
-    const mode = (await fs.stat(join(configDir, "providers.json"))).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // Windows/NTFS doesn't honor POSIX permission bits, so chmod is a no-op there.
+    if (process.platform !== "win32") {
+      const mode = (await fs.stat(join(configDir, "providers.json"))).mode & 0o777;
+      expect(mode).toBe(0o600);
+    }
   });
 
   it("retains, clears, and deletes a saved key explicitly", async () => {

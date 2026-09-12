@@ -4,10 +4,16 @@ export const DEFAULT_MAXIMUM_LOOP_PATTERN_WORDS = 4096;
 export const DEFAULT_MINIMUM_LOOP_PATTERN_CHARACTERS = 16;
 export const DEFAULT_MAXIMUM_LOOP_PATTERN_CHARACTERS = 16384;
 export const DEFAULT_REPETITION_PENALTY = 1;
+// A shorter cycle can still be a loop, but only once it has repeated enough
+// times to match the same total-matched-word budget as the classic 24-word/
+// 5-repetition case (24 * 5 = 120 words); this is what lets a nine-word
+// sentence repeated a dozen-plus times get flagged even though it never
+// reaches the 24-word single-cycle length on its own.
+const MINIMUM_LOOP_UNIT_WORDS = 4;
 const TOKEN_LIMIT_MINIMUM_THINKING_WORDS = 3000;
 const TOKEN_LIMIT_PATTERN_WORDS = 8;
 const TOKEN_LIMIT_MAXIMUM_OUTPUT_CHARACTERS = 32;
-export const LOOP_DETECTOR_VERSION = "5";
+export const LOOP_DETECTOR_VERSION = "6";
 export const LOOP_DETECTION_CONFIG = Object.freeze({
   version: LOOP_DETECTOR_VERSION,
   repetitionCount: DEFAULT_LOOP_REPETITION_COUNT,
@@ -326,19 +332,26 @@ export function detectRepetitionLoop(text, {
     maximumPatternWords,
     Math.floor(words.length / repetitionCount)
   );
+  const minimumMatchedWords = minimumPatternWords * repetitionCount;
   const anchorWordCount = Math.min(12, minimumPatternWords);
   const finalAnchorStart = words.length - anchorWordCount;
   for (
-    let patternWords = minimumPatternWords;
+    let patternWords = MINIMUM_LOOP_UNIT_WORDS;
     patternWords <= maximumCandidatePatternWords;
     patternWords += 1
   ) {
     const priorAnchorStart = finalAnchorStart - patternWords;
     if (!unitsMatch(words, priorAnchorStart, finalAnchorStart, anchorWordCount)) continue;
 
+    // Cycles shorter than minimumPatternWords only count once they have
+    // repeated enough extra times to cover the same total-word budget.
+    const requiredRepetitions = Math.max(
+      repetitionCount,
+      Math.ceil(minimumMatchedWords / patternWords)
+    );
     const finalPatternStart = words.length - patternWords;
     let allPatternsMatch = true;
-    for (let repetitionIndex = 1; repetitionIndex < repetitionCount; repetitionIndex += 1) {
+    for (let repetitionIndex = 1; repetitionIndex < requiredRepetitions; repetitionIndex += 1) {
       const priorPatternStart = finalPatternStart - (repetitionIndex * patternWords);
       if (!unitsMatch(words, priorPatternStart, finalPatternStart, patternWords)) {
         allPatternsMatch = false;
@@ -351,7 +364,7 @@ export function detectRepetitionLoop(text, {
       words,
       finalPatternStart,
       patternWords,
-      repetitionCount
+      requiredRepetitions
     );
     return loopDetectionResult(tokens, occurrenceStarts, patternWords, "words");
   }

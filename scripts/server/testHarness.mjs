@@ -153,14 +153,28 @@ except BaseException as exc:
 `;
 }
 
-export async function executeTests(problem, code, timeoutSeconds) {
-  const directory = await fs.mkdtemp(join(tmpdir(), "humaneval-"));
-  const scriptPath = join(directory, "run.py");
-  await fs.writeFile(scriptPath, pythonHarness(code, problem.test, problem.entry_point), "utf8");
-  return await new Promise((resolveResult) => {
-    const child = spawn("python3", [scriptPath], {
+// macOS/Linux always have "python3" on PATH; Windows installs usually only
+// register "python", and its "python3" is often a non-functional Microsoft
+// Store alias stub that exits immediately without running anything.
+const PYTHON_COMMANDS = ["python3", "python"];
+
+function missingInterpreter({ spawnError, exitCode, stdout }) {
+  return Boolean(spawnError) || (exitCode !== 0 && stdout.trim().length === 0);
+}
+
+async function runHarnessOnce(command, scriptPath, directory, timeoutSeconds) {
+  return await new Promise((resolveAttempt) => {
+    const child = spawn(command, [scriptPath], {
       cwd: directory,
-      env: { PATH: process.env.PATH || "/usr/bin:/usr/local/bin", LANG: "en_US.UTF-8", HOME: directory }
+      env: {
+        PATH: process.env.PATH || "/usr/bin:/usr/local/bin",
+        LANG: "en_US.UTF-8",
+        HOME: directory,
+        // Windows needs these to launch python.exe at all; harmless elsewhere.
+        ...(process.platform === "win32"
+          ? { SystemRoot: process.env.SystemRoot, PATHEXT: process.env.PATHEXT }
+          : {})
+      }
     });
     let stdout = "";
     let stderr = "";
@@ -171,48 +185,78 @@ export async function executeTests(problem, code, timeoutSeconds) {
     }, timeoutSeconds * 1000);
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("close", async (exitCode, signal) => {
+    child.on("close", (exitCode, signal) => {
       clearTimeout(timeout);
-      await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
       if (timedOut) {
-        resolveResult({
-          passed: false,
-          tests: [],
-          stdout,
-          stderr,
-          error: `Execution timed out after ${timeoutSeconds}s`,
-          timeout: true,
-          harnessStdout: stdout,
-          harnessStderr: stderr
+        resolveAttempt({
+          result: {
+            passed: false,
+            tests: [],
+            stdout,
+            stderr,
+            error: `Execution timed out after ${timeoutSeconds}s`,
+            timeout: true,
+            harnessStdout: stdout,
+            harnessStderr: stderr
+          },
+          exitCode: 0,
+          stdout
         });
         return;
       }
       const lastLine = stdout.trim().split("\n").filter(Boolean).pop();
       if (!lastLine) {
         const exitDescription = signal ? `signal ${signal}` : `code ${exitCode ?? "unknown"}`;
-        resolveResult({
-          passed: false,
-          tests: [],
-          stdout,
-          stderr,
-          error: `Harness exited without a JSON result (${exitDescription})`,
-          timeout: false,
-          harnessStdout: stdout,
-          harnessStderr: stderr
+        resolveAttempt({
+          result: {
+            passed: false,
+            tests: [],
+            stdout,
+            stderr,
+            error: `Harness exited without a JSON result (${exitDescription})`,
+            timeout: false,
+            harnessStdout: stdout,
+            harnessStderr: stderr
+          },
+          exitCode: exitCode ?? 1,
+          stdout
         });
         return;
       }
       try {
         const parsed = JSON.parse(lastLine);
-        resolveResult({ ...parsed, timeout: false, harnessStdout: stdout, harnessStderr: stderr });
+        resolveAttempt({ result: { ...parsed, timeout: false, harnessStdout: stdout, harnessStderr: stderr }, exitCode: 0, stdout });
       } catch {
-        resolveResult({ passed: false, tests: [], stdout, stderr, error: "Harness returned non-JSON output", timeout: false, harnessStdout: stdout, harnessStderr: stderr });
+        resolveAttempt({
+          result: { passed: false, tests: [], stdout, stderr, error: "Harness returned non-JSON output", timeout: false, harnessStdout: stdout, harnessStderr: stderr },
+          exitCode: exitCode ?? 1,
+          stdout
+        });
       }
     });
-    child.on("error", async (error) => {
+    child.on("error", (error) => {
       clearTimeout(timeout);
-      await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
-      resolveResult({ passed: false, tests: [], stdout, stderr, error: error.message, timeout: false, harnessStdout: stdout, harnessStderr: stderr });
+      resolveAttempt({
+        result: { passed: false, tests: [], stdout, stderr, error: error.message, timeout: false, harnessStdout: stdout, harnessStderr: stderr },
+        spawnError: true,
+        stdout
+      });
     });
   });
+}
+
+export async function executeTests(problem, code, timeoutSeconds) {
+  const directory = await fs.mkdtemp(join(tmpdir(), "humaneval-"));
+  const scriptPath = join(directory, "run.py");
+  await fs.writeFile(scriptPath, pythonHarness(code, problem.test, problem.entry_point), "utf8");
+  try {
+    let attempt;
+    for (const command of PYTHON_COMMANDS) {
+      attempt = await runHarnessOnce(command, scriptPath, directory, timeoutSeconds);
+      if (!missingInterpreter(attempt)) break;
+    }
+    return attempt.result;
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
 }

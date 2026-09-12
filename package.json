@@ -58,5 +58,9 @@
   },
   "optionalDependencies": {
     "@github/keytar": "^7.10.6"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "@github/keytar@7.10.6": true
   }
 }

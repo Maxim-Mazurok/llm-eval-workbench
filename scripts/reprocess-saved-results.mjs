@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";

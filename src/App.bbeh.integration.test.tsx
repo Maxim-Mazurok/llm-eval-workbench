@@ -4,6 +4,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { BBEH_PROMPT_TEMPLATE, BBEH_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT } from "./domain/benchmark";
 
+// A pack benchmark whose prompt ships with its dataset rather than in code,
+// exercising the server-registry lookup path without depending on any real
+// installed pack (packs are optional and gitignored).
+vi.mock("./domain/benchmarkPacks", () => ({
+  packBenchmarkOptions: [
+    {
+      id: "example-pack-benchmark",
+      label: "Example Pack: Sample Benchmark",
+      kind: "qa",
+      datasetSize: 10,
+      promptTemplate: "%problem%",
+      taskNumbersPlaceholder: "0, 1, 2 or 10-25. Empty uses start/limit.",
+      promptTemplateHint: "Use %problem% where the task input should be inserted."
+    }
+  ]
+}));
+
 type RunFixture = Record<string, unknown>;
 
 const bbehResultPassed = {

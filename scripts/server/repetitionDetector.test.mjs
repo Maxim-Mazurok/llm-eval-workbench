@@ -26,7 +26,7 @@ describe("detectRepetitionLoop", () => {
       repetitions: 5,
       patternWords: 34,
       matchedWords: 170,
-      detectorVersion: "5"
+      detectorVersion: "6"
     });
     expect(detectRepetitionLoop(text)?.occurrences).toHaveLength(5);
     expect(detectRepetitionLoop(text)?.occurrences[0]).toEqual({
@@ -43,6 +43,22 @@ describe("detectRepetitionLoop", () => {
 
   it("does not flag repeated short phrases", () => {
     const text = "Wait and reconsider. ".repeat(20);
+
+    expect(detectRepetitionLoop(text)).toBeNull();
+  });
+
+  it("flags a sub-24-word cycle once it repeats enough to match the word budget", () => {
+    const cycle = "Let's check if \"Culumi\" is a typo for \"Culmi\".";
+    const text = `${cycle} `.repeat(13);
+
+    const detection = detectRepetitionLoop(text);
+    expect(detection).toMatchObject({ detectorVersion: "6", patternWords: 10 });
+    expect(detection.repetitions).toBeGreaterThanOrEqual(12);
+  });
+
+  it("still ignores a short phrase that has not repeated enough times to clear the budget", () => {
+    const cycle = "Let's check if \"Culumi\" is a typo for \"Culmi\".";
+    const text = `${cycle} `.repeat(10);
 
     expect(detectRepetitionLoop(text)).toBeNull();
   });
@@ -69,7 +85,7 @@ describe("detectRepetitionLoop", () => {
     const detection = detectRepetitionLoop(text);
 
     expect(detection).toMatchObject({
-      detectorVersion: "5",
+      detectorVersion: "6",
       repetitions: 6,
       patternCharacters: 29,
       matchedCharacters: 174
@@ -95,7 +111,7 @@ describe("detectRepetitionLoop", () => {
     const detection = detectRepetitionLoop(text);
 
     expect(detection).toMatchObject({
-      detectorVersion: "5",
+      detectorVersion: "6",
       repetitions: 6,
       patternWords: 31
     });
@@ -252,7 +268,7 @@ describe("reconstructSavedLoopDetection", () => {
 
     expect(reconstructed).toMatchObject({
       channel: "thinking",
-      detectorVersion: "5",
+      detectorVersion: "6",
       repetitions: 5,
       patternWords: 34
     });

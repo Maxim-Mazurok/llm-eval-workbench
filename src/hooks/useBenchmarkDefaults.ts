@@ -3,9 +3,8 @@ import { BENCH_API } from "../domain/benchmark";
 
 /**
  * Default system prompt per benchmark id, read from the server's benchmark
- * registry. Benchmarks whose prompt lives with their dataset (the example-pack
- * pack ships the exported production prompt inside each dataset file) have no
- * client-side copy at all, so the form has to ask the server for it. An
+ * registry. Some pack benchmarks ship their prompt with their dataset instead
+ * of declaring it client-side, so the form has to ask the server for it. An
  * unreachable server just yields an empty map and the form falls back to
  * whatever the benchmark option declares.
  */

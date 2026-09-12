@@ -4,6 +4,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BenchRun } from "../domain/benchmark";
 import { RunStrip } from "./RunStrip";
 
+// A graded pack benchmark, mocked so this test doesn't depend on any real
+// installed pack (packs are optional and gitignored).
+vi.mock("../domain/benchmarkPacks", () => ({
+  packBenchmarkOptions: [
+    {
+      id: "example-graded-benchmark",
+      label: "Example Pack: Graded Benchmark",
+      kind: "qa",
+      scoring: "graded",
+      datasetSize: 10,
+      promptTemplate: "%problem%",
+      taskNumbersPlaceholder: "0, 1, 2 or 10-25. Empty uses start/limit.",
+      promptTemplateHint: "Use %problem% where the task input should be inserted."
+    }
+  ]
+}));
+
 afterEach(cleanup);
 
 function benchmarkRun(id: string, benchmark: string, model: string): BenchRun {

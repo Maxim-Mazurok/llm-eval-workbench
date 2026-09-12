@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
