@@ -1,16 +1,20 @@
 export const DEFAULT_LOOP_REPETITION_COUNT = 5;
 export const DEFAULT_MINIMUM_LOOP_PATTERN_WORDS = 24;
 export const DEFAULT_MAXIMUM_LOOP_PATTERN_WORDS = 4096;
+export const DEFAULT_MINIMUM_LOOP_PATTERN_CHARACTERS = 16;
+export const DEFAULT_MAXIMUM_LOOP_PATTERN_CHARACTERS = 16384;
 export const DEFAULT_REPETITION_PENALTY = 1;
 const TOKEN_LIMIT_MINIMUM_THINKING_WORDS = 3000;
 const TOKEN_LIMIT_PATTERN_WORDS = 8;
 const TOKEN_LIMIT_MAXIMUM_OUTPUT_CHARACTERS = 32;
-export const LOOP_DETECTOR_VERSION = "4";
+export const LOOP_DETECTOR_VERSION = "5";
 export const LOOP_DETECTION_CONFIG = Object.freeze({
   version: LOOP_DETECTOR_VERSION,
   repetitionCount: DEFAULT_LOOP_REPETITION_COUNT,
   minimumPatternWords: DEFAULT_MINIMUM_LOOP_PATTERN_WORDS,
   maximumPatternWords: DEFAULT_MAXIMUM_LOOP_PATTERN_WORDS,
+  minimumPatternCharacters: DEFAULT_MINIMUM_LOOP_PATTERN_CHARACTERS,
+  maximumPatternCharacters: DEFAULT_MAXIMUM_LOOP_PATTERN_CHARACTERS,
   tokenLimitMinimumThinkingWords: TOKEN_LIMIT_MINIMUM_THINKING_WORDS,
   tokenLimitPatternWords: TOKEN_LIMIT_PATTERN_WORDS,
   tokenLimitMaximumOutputCharacters: TOKEN_LIMIT_MAXIMUM_OUTPUT_CHARACTERS
@@ -127,21 +131,43 @@ function normalizedWordTokens(text) {
   });
 }
 
-function loopDetectionResult(tokens, occurrenceStarts, patternWords, detectionMode) {
+function normalizedCharacterTokens(text) {
+  const sourceText = String(text || "");
+  const tokens = [...sourceText.matchAll(/\S/gu)].map((match) => ({
+    unit: match[0].toLowerCase(),
+    start: match.index,
+    end: match.index + match[0].length
+  }));
+  return tokens.map((token, index) => {
+    let sourceEnd = tokens[index + 1]?.start ?? sourceText.length;
+    while (sourceEnd > token.end && /\s/u.test(sourceText[sourceEnd - 1])) sourceEnd -= 1;
+    return { ...token, sourceEnd };
+  });
+}
+
+function loopDetectionResult(tokens, occurrenceStarts, patternLength, metric, detectionMode) {
   const occurrences = [...occurrenceStarts]
     .sort((left, right) => left - right)
     .map((startWord) => ({
       start: tokens[startWord].start,
-      end: tokens[startWord + patternWords - 1].sourceEnd
+      end: tokens[startWord + patternLength - 1].sourceEnd
     }));
+  const isCharacterPattern = metric === "characters";
   return {
     detectorVersion: LOOP_DETECTOR_VERSION,
     repetitions: occurrences.length,
-    patternWords,
-    matchedWords: occurrences.length * patternWords,
-    excerpt: tokens.slice(occurrenceStarts[0], occurrenceStarts[0] + Math.min(patternWords, 40))
-      .map((token) => token.word)
-      .join(" "),
+    ...(isCharacterPattern
+      ? {
+          patternCharacters: patternLength,
+          matchedCharacters: occurrences.length * patternLength
+        }
+      : {
+          patternWords: patternLength,
+          matchedWords: occurrences.length * patternLength
+        }),
+    excerpt: tokens.slice(occurrenceStarts[0], occurrenceStarts[0] + Math.min(patternLength, 40))
+      .map((token) => token.word ?? token.unit)
+      .join(isCharacterPattern ? "" : " "),
     occurrences,
     ...(detectionMode ? { detectionMode } : {})
   };
@@ -183,25 +209,99 @@ export function reconstructSavedLoopDetection(result) {
   });
 }
 
-function wordsMatch(words, leftStart, rightStart, wordCount) {
-  for (let wordOffset = 0; wordOffset < wordCount; wordOffset += 1) {
-    if (words[leftStart + wordOffset] !== words[rightStart + wordOffset]) return false;
+function unitsMatch(units, leftStart, rightStart, unitCount) {
+  for (let unitOffset = 0; unitOffset < unitCount; unitOffset += 1) {
+    if (units[leftStart + unitOffset] !== units[rightStart + unitOffset]) return false;
   }
   return true;
 }
 
-function alignedOccurrenceStarts(words, finalPatternStart, patternWords, repetitionCount) {
-  let repeatedRunStart = finalPatternStart - ((repetitionCount - 1) * patternWords);
+function alignedOccurrenceStarts(units, finalPatternStart, patternLength, repetitionCount) {
+  let repeatedRunStart = finalPatternStart - ((repetitionCount - 1) * patternLength);
   while (
     repeatedRunStart > 0
-    && words[repeatedRunStart - 1] === words[repeatedRunStart - 1 + patternWords]
+    && units[repeatedRunStart - 1] === units[repeatedRunStart - 1 + patternLength]
   ) {
     repeatedRunStart -= 1;
   }
   return Array.from(
-    { length: Math.floor((words.length - repeatedRunStart) / patternWords) },
-    (_, repetitionIndex) => repeatedRunStart + (repetitionIndex * patternWords)
+    { length: Math.floor((units.length - repeatedRunStart) / patternLength) },
+    (_, repetitionIndex) => repeatedRunStart + (repetitionIndex * patternLength)
   );
+}
+
+function hasShorterPattern(units, start, patternLength, minimumPatternLength) {
+  for (let candidateLength = 1; candidateLength < minimumPatternLength; candidateLength += 1) {
+    if (patternLength % candidateLength !== 0) continue;
+    if (unitsMatch(units, start, start + candidateLength, patternLength - candidateLength)) return true;
+  }
+  return false;
+}
+
+function detectCharacterRepetitionLoop(text, {
+  repetitionCount,
+  minimumPatternCharacters = DEFAULT_MINIMUM_LOOP_PATTERN_CHARACTERS,
+  maximumPatternCharacters = DEFAULT_MAXIMUM_LOOP_PATTERN_CHARACTERS
+}) {
+  const tokens = normalizedCharacterTokens(text);
+  const characters = tokens.map((token) => token.unit);
+  const maximumCandidatePatternCharacters = Math.min(
+    maximumPatternCharacters,
+    Math.floor(characters.length / repetitionCount)
+  );
+  if (maximumCandidatePatternCharacters < minimumPatternCharacters) return null;
+
+  const punctuationPrefixCounts = [0];
+  for (const character of characters) {
+    punctuationPrefixCounts.push(
+      punctuationPrefixCounts.at(-1) + (/[^\p{L}\p{N}_]/u.test(character) ? 1 : 0)
+    );
+  }
+  const anchorCharacterCount = Math.min(12, minimumPatternCharacters);
+  const finalAnchorStart = characters.length - anchorCharacterCount;
+  for (
+    let patternCharacters = minimumPatternCharacters;
+    patternCharacters <= maximumCandidatePatternCharacters;
+    patternCharacters += 1
+  ) {
+    const priorAnchorStart = finalAnchorStart - patternCharacters;
+    if (!unitsMatch(characters, priorAnchorStart, finalAnchorStart, anchorCharacterCount)) continue;
+
+    const finalPatternStart = characters.length - patternCharacters;
+    const punctuationCount = punctuationPrefixCounts[characters.length]
+      - punctuationPrefixCounts[finalPatternStart];
+    if (punctuationCount / patternCharacters < 0.5) continue;
+    if (hasShorterPattern(
+      characters,
+      finalPatternStart,
+      patternCharacters,
+      minimumPatternCharacters
+    )) continue;
+
+    let allPatternsMatch = true;
+    for (let repetitionIndex = 1; repetitionIndex < repetitionCount; repetitionIndex += 1) {
+      const priorPatternStart = finalPatternStart - (repetitionIndex * patternCharacters);
+      if (!unitsMatch(characters, priorPatternStart, finalPatternStart, patternCharacters)) {
+        allPatternsMatch = false;
+        break;
+      }
+    }
+    if (!allPatternsMatch) continue;
+
+    const occurrenceStarts = alignedOccurrenceStarts(
+      characters,
+      finalPatternStart,
+      patternCharacters,
+      repetitionCount
+    );
+    return loopDetectionResult(
+      tokens,
+      occurrenceStarts,
+      patternCharacters,
+      "characters"
+    );
+  }
+  return null;
 }
 
 export function detectTokenLimitRepetitionLoop({ thinking, output, finishReason }) {
@@ -226,8 +326,6 @@ export function detectRepetitionLoop(text, {
     maximumPatternWords,
     Math.floor(words.length / repetitionCount)
   );
-  if (maximumCandidatePatternWords < minimumPatternWords) return null;
-
   const anchorWordCount = Math.min(12, minimumPatternWords);
   const finalAnchorStart = words.length - anchorWordCount;
   for (
@@ -236,13 +334,13 @@ export function detectRepetitionLoop(text, {
     patternWords += 1
   ) {
     const priorAnchorStart = finalAnchorStart - patternWords;
-    if (!wordsMatch(words, priorAnchorStart, finalAnchorStart, anchorWordCount)) continue;
+    if (!unitsMatch(words, priorAnchorStart, finalAnchorStart, anchorWordCount)) continue;
 
     const finalPatternStart = words.length - patternWords;
     let allPatternsMatch = true;
     for (let repetitionIndex = 1; repetitionIndex < repetitionCount; repetitionIndex += 1) {
       const priorPatternStart = finalPatternStart - (repetitionIndex * patternWords);
-      if (!wordsMatch(words, priorPatternStart, finalPatternStart, patternWords)) {
+      if (!unitsMatch(words, priorPatternStart, finalPatternStart, patternWords)) {
         allPatternsMatch = false;
         break;
       }
@@ -255,7 +353,10 @@ export function detectRepetitionLoop(text, {
       patternWords,
       repetitionCount
     );
-    return loopDetectionResult(tokens, occurrenceStarts, patternWords);
+    return loopDetectionResult(tokens, occurrenceStarts, patternWords, "words");
   }
-  return null;
+  return detectCharacterRepetitionLoop(text, {
+    repetitionCount,
+    maximumPatternCharacters: maximumPatternWords * 4
+  });
 }

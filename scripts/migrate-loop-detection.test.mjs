@@ -92,7 +92,7 @@ describe("loop detection metadata migration", () => {
     const updatedResults = JSON.parse(await fs.readFile(join(runDirectory, "results.json"), "utf8"));
     expect(updatedResults[0].loopDetection).toMatchObject({
       channel: "thinking",
-      detectorVersion: "4"
+      detectorVersion: "5"
     });
     expect(updatedResults[0].loopDetection.occurrences).toHaveLength(5);
     expect(updatedResults[1]).toMatchObject({
@@ -107,7 +107,7 @@ describe("loop detection metadata migration", () => {
       finishReason: "length",
       loopDetection: {
         channel: "thinking",
-        detectorVersion: "4"
+        detectorVersion: "5"
       }
     });
     expect(updatedResults[2].tests).toEqual([{ source: "answer matches", passed: false }]);

@@ -342,7 +342,7 @@ export function TaskResults({
                   </details>
                 ) : null}
                 {result?.modelError ? <pre>{result.modelError}</pre> : null}
-                {result?.loopDetection ? <pre className="loop-signal">Detected {result.loopDetection.repetitions} repeated cycles in {result.loopDetection.channel} ({result.loopDetection.patternWords} words per cycle). {result.looping ? "Generation stopped early." : "Generation continued to its normal finish."}</pre> : null}
+                {result?.loopDetection ? <pre className="loop-signal">Detected {result.loopDetection.repetitions} repeated cycles in {result.loopDetection.channel} ({result.loopDetection.patternCharacters ?? result.loopDetection.patternWords} {result.loopDetection.patternCharacters ? "characters" : "words"} per cycle). {result.looping ? "Generation stopped early." : "Generation continued to its normal finish."}</pre> : null}
                 {thinkingInComments ? <details open><summary>Thinking in comments</summary><pre className="comment-signal">{formatCommentSignal(commentSignal, commentSignalThreshold)}</pre></details> : null}
                 {benchmarkMentioned ? <details open><summary>Benchmark name mention</summary><pre className="comment-signal">{formatBenchmarkMentionSignal(benchmarkMentionSignal)}</pre></details> : null}
                 {result ? <details open><summary>{labels.ledger}</summary>{result.tests.length ? result.tests.map((test, index) => <pre key={index} className={test.passed ? "assert-pass" : "assert-fail"}>{formatAssert(test)}</pre>) : <pre className={row.status === "error" ? "assert-error" : undefined}>{labels.ledgerEmpty}</pre>}</details> : null}
