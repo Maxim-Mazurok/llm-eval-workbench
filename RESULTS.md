@@ -43,7 +43,7 @@ Conclusions:
 - MXFP4 runs 2.5x faster than 6bit and fits much more comfortably on the 32GB MBP M5, same eval accuracy
 - Opus-Distilled quite a bit lower accuracy than base, might be more clever on math since that is what it was distilled on for the most part
 - Gemma-4-31B is very strong, barely fits tho
-- Uzu seems much faster, like 4x, around 34 tokens per second; downside is no thinking budget enforcement, in 2nd task it looped pretty aggressively and quit early, could be quality issue, needs more testing.
+- Uzu seems much faster, like 4x, around 34 tokens per second; downside is no thinking budget enforcement, in 2nd task it looped pretty aggressively and quit early, could be quality issue, needs more testing... Update: it was the only loop observed after >2 passes, so might be fine. Were more loops in BBEH tho.
 
 ### Qwen3.8-27B
 
