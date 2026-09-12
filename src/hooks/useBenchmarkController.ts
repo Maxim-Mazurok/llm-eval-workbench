@@ -317,6 +317,11 @@ export function useBenchmarkController() {
     navigateTo(routeTarget);
   }
 
+  function selectComparison() {
+    setError(null);
+    navigateTo({ view: "comparison" });
+  }
+
   useEffect(() => {
     if (!selectedRunId) {
       setTokens([]);
@@ -552,6 +557,7 @@ export function useBenchmarkController() {
     promptTemplate,
     extraBody,
     runs,
+    route,
     selectedRunId,
     selectedRun,
     queueActive,
@@ -597,6 +603,7 @@ export function useBenchmarkController() {
     setBenchmarkMentionRegex,
     toggleNotificationsForRun,
     selectRun,
+    selectComparison,
     selectNewBench,
     startRun,
     cancelRun,

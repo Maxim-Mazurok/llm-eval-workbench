@@ -283,6 +283,7 @@ export type BenchRun = {
   status: string;
   benchmark?: string;
   benchmarkDataRevision?: string | null;
+  datasetSize?: number | null;
   model: string;
   providerId?: string | null;
   providerName?: string | null;
@@ -299,6 +300,18 @@ export type BenchRun = {
   /** Mean of per-task [0,1] scores; equals the pass rate for binary benchmarks. */
   meanScore?: number;
   finalMeanScore?: number | null;
+  comparison?: {
+    completePassCount: number;
+    completePassMeanScore: number | null;
+    loopingCount: number;
+    benchmarkMentionCount: number;
+    signalTotal: number;
+    activeDurationMilliseconds: number;
+    completePassLoopingCount: number;
+    completePassBenchmarkMentionCount: number;
+    completePassSignalTotal: number;
+    completePassActiveDurationMilliseconds: number;
+  };
   assertionsPassed: number;
   assertionsTotal: number;
   assertionScore: number;
@@ -468,9 +481,12 @@ export type BenchRoute = {
 } | {
   view: "run";
   id: string;
+} | {
+  view: "comparison";
 };
 
 export function parseBenchRoute(pathname: string): BenchRoute {
+  if (/^\/comparison\/?$/.test(pathname)) return { view: "comparison" };
   const runMatch = pathname.match(/^\/run\/([^/]+)\/?$/);
   if (runMatch) return { view: "run", id: decodeURIComponent(runMatch[1]) };
   return { view: "new" };
@@ -482,5 +498,6 @@ export function readBenchRoute(): BenchRoute {
 }
 
 export function routePath(route: BenchRoute) {
-  return route.view === "run" ? `/run/${encodeURIComponent(route.id)}` : "/new";
+  if (route.view === "run") return `/run/${encodeURIComponent(route.id)}`;
+  return route.view === "comparison" ? "/comparison" : "/new";
 }

@@ -60,6 +60,66 @@ export function runScoreSum(results = []) {
   return results.reduce((sum, result) => sum + normalizeTaskScore(result.score, result.passed), 0);
 }
 
+function comparisonMetrics(run) {
+  const passCount = normalizePassCount(run.passCount || run.publicConfig?.passCount || 1);
+  const datasetSize = Number(run.datasetSize);
+  const selectedTaskCount = new Set(run.selectedIndices || []).size;
+  const coversFullDataset = Number.isFinite(datasetSize)
+    && datasetSize > 0
+    && selectedTaskCount >= datasetSize;
+  const tasksPerPass = coversFullDataset ? datasetSize : null;
+  const resultsByPass = new Map();
+  for (const result of run.results) {
+    const passNumber = normalizePassCount(result.passNumber || 1);
+    const passResults = resultsByPass.get(passNumber) || [];
+    passResults.push(result);
+    resultsByPass.set(passNumber, passResults);
+  }
+  const completePassResults = tasksPerPass === null
+    ? []
+    : [...resultsByPass.values()]
+      .filter((passResults) => passResults.length >= tasksPerPass)
+      .flat();
+  const benchmarkMentionPattern = run.publicConfig?.benchmarkMentionRegex;
+  let benchmarkMentionMatcher = null;
+  try {
+    benchmarkMentionMatcher = benchmarkMentionPattern ? new RegExp(benchmarkMentionPattern, "i") : null;
+  } catch {
+    benchmarkMentionMatcher = null;
+  }
+  function benchmarkMentionCount(results) {
+    return benchmarkMentionMatcher
+      ? results.filter((result) => [
+      result.rawOutput,
+      result.thinkingOutput,
+      result.rawTranscript,
+      result.extractedCode
+      ].some((text) => text && benchmarkMentionMatcher.test(text))).length
+      : 0;
+  }
+  function activeDurationMilliseconds(results) {
+    return results.reduce((totalMilliseconds, result) => {
+      const durationMilliseconds = Number(result.activeDurationMilliseconds ?? result.generationMs);
+      return totalMilliseconds + (Number.isFinite(durationMilliseconds) && durationMilliseconds > 0 ? durationMilliseconds : 0);
+    }, 0);
+  }
+
+  return {
+    completePassCount: tasksPerPass === null ? 0 : completePassResults.length / tasksPerPass,
+    completePassMeanScore: completePassResults.length
+      ? runScoreSum(completePassResults) / completePassResults.length
+      : null,
+    loopingCount: run.results.filter((result) => result.looping).length,
+    benchmarkMentionCount: benchmarkMentionCount(run.results),
+    signalTotal: run.results.length,
+    activeDurationMilliseconds: activeDurationMilliseconds(run.results),
+    completePassLoopingCount: completePassResults.filter((result) => result.looping).length,
+    completePassBenchmarkMentionCount: benchmarkMentionCount(completePassResults),
+    completePassSignalTotal: completePassResults.length,
+    completePassActiveDurationMilliseconds: activeDurationMilliseconds(completePassResults)
+  };
+}
+
 export function runSummary(run, { includeResults = true } = {}) {
   const { completed, passed, failed } = runCountsFromResults(run.results);
   const scoreSum = runScoreSum(run.results);
@@ -73,6 +133,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     status: run.status,
     benchmark: run.benchmark || "humaneval",
     benchmarkDataRevision: run.benchmarkDataRevision || null,
+    datasetSize: Number.isFinite(run.datasetSize) ? run.datasetSize : null,
     model: run.model,
     providerId: run.providerId || null,
     providerName: run.providerName || null,
@@ -93,6 +154,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     assertionsPassed,
     assertionsTotal,
     assertionScore: assertionsTotal ? assertionsPassed / assertionsTotal : 0,
+    comparison: comparisonMetrics(run),
     currentTaskId: run.currentTaskId,
     requestedStopMode: run.requestedStopMode ?? null,
     // Place in the waiting line while status is "queued"; null once running.

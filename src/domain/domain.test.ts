@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   benchmarkApiOrigin,
+  parseBenchRoute,
+  routePath,
   type BenchResult,
   type BenchRun,
   type EventEnvelope,
@@ -104,6 +106,13 @@ describe("benchmark API origin", () => {
   it("prefers an explicitly configured benchmark API URL", () => {
     expect(benchmarkApiOrigin("http://192.168.0.235:5173/run/example", "http://127.0.0.1:9999/"))
       .toBe("http://127.0.0.1:9999");
+  });
+});
+
+describe("benchmark routes", () => {
+  it("round-trips the comparison page", () => {
+    expect(parseBenchRoute("/comparison")).toEqual({ view: "comparison" });
+    expect(routePath({ view: "comparison" })).toBe("/comparison");
   });
 });
 

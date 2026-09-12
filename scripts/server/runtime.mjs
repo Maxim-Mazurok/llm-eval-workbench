@@ -636,6 +636,7 @@ export function createRuntimeServer({
             return Array.from({ length: Math.max(0, end - start) }, (_, offset) => start + offset);
           })();
       run.selectedIndices = selectedIndices;
+      run.datasetSize = allProblems.length;
       const problems = selectedIndices.map((index) => allProblems[index]);
       const passCount = normalizePassCount(run.passCount);
       run.passCount = passCount;
@@ -1088,6 +1089,7 @@ export function createRuntimeServer({
       finishedAt: null,
       benchmark: benchmark.id,
       benchmarkDataRevision: benchmark.dataRevision || null,
+      datasetSize: allProblems.length,
       model: String(config.model || "").trim(),
       providerId,
       providerName,
@@ -1342,6 +1344,15 @@ export function createRuntimeServer({
           abortController: null,
           abortControllers: new Set()
         };
+        if (!Number.isFinite(run.datasetSize)) {
+          try {
+            const benchmark = getBenchmark(run.benchmark);
+            const allProblems = await loadBenchmarkProblems(benchmark);
+            run.datasetSize = allProblems.length;
+          } catch {
+            run.datasetSize = null;
+          }
+        }
         if (run.adaptiveRepetitionPenalty) {
           const penaltyState = restoreAdaptiveRepetitionPenaltyState(
             run.results,

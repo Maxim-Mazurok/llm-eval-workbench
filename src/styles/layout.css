@@ -13,6 +13,23 @@
   border-radius: 6px;
 }
 
+.run-strip-head {
+  justify-content: space-between;
+}
+
+.run-strip-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  color: var(--blue);
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: none;
+}
+
 .run-filters {
   display: flex;
   gap: 8px;

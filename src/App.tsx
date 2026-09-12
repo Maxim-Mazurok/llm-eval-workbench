@@ -1,6 +1,7 @@
 import { PanelLeftOpen } from "lucide-react";
 import { useState } from "react";
 import { MetricsPanel } from "./components/MetricsPanel";
+import { BenchmarkComparison } from "./components/BenchmarkComparison";
 import { PassVariabilityChart } from "./components/PassVariabilityChart";
 import { RunStrip } from "./components/RunStrip";
 import { SidebarConfig } from "./components/SidebarConfig";
@@ -34,6 +35,7 @@ export default function App() {
     promptTemplate,
     extraBody,
     runs,
+    route,
     selectedRunId,
     selectedRun,
     queueActive,
@@ -79,6 +81,7 @@ export default function App() {
     setBenchmarkMentionRegex,
     toggleNotificationsForRun,
     selectRun,
+    selectComparison,
     selectNewBench,
     startRun,
     cancelRun,
@@ -98,6 +101,14 @@ export default function App() {
     loading: availableModelsLoading,
     refresh: refreshAvailableModels
   } = useAvailableModels(providerId);
+
+  if (route.view === "comparison") {
+    return (
+      <main className="comparison-shell">
+        <BenchmarkComparison runs={runs} onBack={selectNewBench} />
+      </main>
+    );
+  }
 
   return (
     <main className={sidebarCollapsed ? "bench-shell sidebar-collapsed" : "bench-shell"}>
@@ -171,6 +182,7 @@ export default function App() {
           runs={runs}
           selectedRunId={selectedRunId}
           onSelectNew={selectNewBench}
+          onSelectComparison={selectComparison}
           onNavigate={selectRun}
           onDelete={deleteRun}
           onRemoveFromQueue={removeRunFromQueue}

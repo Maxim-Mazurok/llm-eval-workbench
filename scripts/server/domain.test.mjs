@@ -37,6 +37,8 @@ function runFixture(overrides = {}) {
     dir: null,
     status: "completed",
     model: "demo-model",
+    benchmark: "humaneval",
+    datasetSize: 1,
     baseUrl: "http://localhost:8000/v1",
     createdAt: "2026-06-16T00:00:00.000Z",
     startedAt: "2026-06-16T00:00:00.000Z",
@@ -155,6 +157,55 @@ describe("server domain helpers", () => {
     syncRunCountsFromResults(run);
 
     expect(run).toMatchObject({ completed: 1, passed: 1, failed: 0 });
+  });
+
+  it("summarizes complete passes and compact comparison warnings", () => {
+    const run = runFixture({
+      total: 6,
+      datasetSize: 3,
+      selectedIndices: [0, 1, 2],
+      passCount: 2,
+      publicConfig: {
+        benchmarkMentionRegex: "human\\s*eval",
+        maxOutputTokens: 2048,
+        passCount: 2
+      },
+      results: [
+        { taskId: "one", passNumber: 1, passed: true, tests: [], rawOutput: "HumanEval", looping: true },
+        { taskId: "two", passNumber: 1, passed: false, score: 0.5, tests: [] },
+        { taskId: "three", passNumber: 1, passed: true, tests: [] },
+        { taskId: "one", passNumber: 2, passed: false, tests: [] }
+      ]
+    });
+
+    expect(runSummary(run, { includeResults: false }).comparison).toEqual({
+      completePassCount: 1,
+      completePassMeanScore: 2.5 / 3,
+      loopingCount: 1,
+      benchmarkMentionCount: 1,
+      signalTotal: 4,
+      activeDurationMilliseconds: 0,
+      completePassLoopingCount: 1,
+      completePassBenchmarkMentionCount: 1,
+      completePassSignalTotal: 3,
+      completePassActiveDurationMilliseconds: 0
+    });
+  });
+
+  it("does not count a configured subset as a complete benchmark pass", () => {
+    const run = runFixture({
+      total: 1,
+      datasetSize: 164,
+      selectedIndices: [10]
+    });
+
+    expect(runSummary(run, { includeResults: false }).comparison).toMatchObject({
+      completePassCount: 0,
+      completePassMeanScore: null,
+      activeDurationMilliseconds: 110,
+      completePassSignalTotal: 0,
+      completePassActiveDurationMilliseconds: 0
+    });
   });
 
   it("redacts api keys for every endpoint", () => {

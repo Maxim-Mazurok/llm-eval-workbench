@@ -1,4 +1,4 @@
-import { Check, Plus, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Check, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { benchmarkOption, runBenchmarkId, runBenchmarkScoring, type BenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
 import { formatTime, pct, progressSegments, runMeanScore, runQueueBadgePosition, runTotal, statusIsLive } from "../domain/runs";
@@ -8,6 +8,7 @@ export function RunStrip({
   runs,
   selectedRunId,
   onSelectNew,
+  onSelectComparison,
   onNavigate,
   onDelete,
   onRemoveFromQueue
@@ -15,6 +16,7 @@ export function RunStrip({
   runs: BenchRun[];
   selectedRunId: string | null;
   onSelectNew: () => void;
+  onSelectComparison: () => void;
   onNavigate: (route: BenchRoute) => void;
   onDelete: (run: BenchRun) => void;
   onRemoveFromQueue: (run: BenchRun) => void;
@@ -30,7 +32,13 @@ export function RunStrip({
 
   return (
     <section className="run-strip">
-      <div className="pane-head">Benchmarks</div>
+      <div className="pane-head run-strip-head">
+        <span>Benchmarks</span>
+        <button type="button" onClick={onSelectComparison}>
+          Compare results
+          <ArrowUpRight size={14} />
+        </button>
+      </div>
       <div className="run-filters">
         <label>
           <BenchmarkCombobox
