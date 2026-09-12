@@ -107,7 +107,7 @@ describe("loop detection metadata migration", () => {
       finishReason: "length",
       loopDetection: {
         channel: "thinking",
-        detectorVersion: "4"
+        detectorVersion: "5"
       }
     });
     expect(updatedResults[2].tests).toEqual([{ source: "answer matches", passed: false }]);
