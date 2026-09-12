@@ -302,7 +302,7 @@ describe("runtime server", () => {
       adaptiveRepetitionPenalty: true,
       repetitionPenalty: 0.5,
       parallelTasks: 1,
-      loopDetectionConfig: { version: "4", repetitionCount: 5 }
+      loopDetectionConfig: { version: "5", repetitionCount: 5 }
     });
 
     const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
