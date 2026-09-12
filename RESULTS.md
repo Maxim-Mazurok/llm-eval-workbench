@@ -36,7 +36,7 @@ Conclusions:
 - 98.8% - 8192 thinking, 16384 tokens, 3 passes, Qwen3.6-27B-MXFP4, 31h28m (failed, same in all passes: 134 (didn't handle edge case correctly, pretty clearly wrong assumption), 145) (#94 failed if extracting code from thinking)
 - 98.8% - 8192 thinking, 16384 tokens, 1 pass, Qwen3.6-27B-MLX-6bit, 24h8m (failed: 32 
 (luck-based solution), 145 (tricky requirement misinterpretation); 2nd incomplete pass: 145)
-- [WIP 33/164 6.5%-99.8%] 97% - 8192+2048 thinking+output (no force), 1 pass, alibaba:qwen3.6:27b:mirai:mirai-m:4 via uzu, 34m40s
+- 98.8% - 8192 thinking, 2048 output, 1 pass, alibaba:qwen3.6:27b:mirai:mirai-m:4, 2h50m (mentions benchmark name a lot)
 
 Conclusions:
 - Qwen3.6-27B is a very strong model
@@ -69,6 +69,7 @@ Conclusions:
 
 ## BBEH
 
+- 47.2% - 8192 thinking, 8192 output, 1 pass, alibaba:qwen3.6:27b:mirai:mirai-m:4, 25h44m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` (29/460 looping)
 - [WIP 52/460 5%-93.7%] - 44.2% - 16384 thinking, 18432 tokens, 1 pass, Qwen3.6-27B-MXFP4, 18h32m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1`
 - [WIP 55/460 2.2%-90.2%] - 18.2% - 8192? thinking, 16384 tokens, 1 pass, gpt-oss-20b-MXFP4-Q8, 2h15m, `BBEH Mini (official data)`
 - [WIP 29/460 0%-93.7%] - 0% - 16384 thinking, 18432 tokens, 1 pass, gemma-4-12B-it-8bit + VLM MTP gemma-4-12B-it-qat-assistant-bf16 block-size 3, 8h14m, `BBEH Mini (corrected) · data 80d12ca+linguini-single-blank-v1` - looping all the time, both with default and 1.08 repetition penalty
@@ -79,3 +80,8 @@ Conclusions:
 
 Conclusions:
 - gemma-4-12B-it-8bit keeps thinking whole token budget even when forced to answer when using VLM MTP gemma-4-12B-it-qat-assistant-bf16, without it - stops thinking at limit and answers; Disabled in https://github.com/jundot/omlx/commit/9387ebddf6f62b27ac0547ca82e09fd0f418bf40
+
+
+--
+
+TODO: try deepseek-r1:8b or 7b/14b/etc.
