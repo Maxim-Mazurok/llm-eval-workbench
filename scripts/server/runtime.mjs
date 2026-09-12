@@ -115,6 +115,7 @@ export function createRuntimeServer({
   function enqueueRun(run) {
     run.status = "queued";
     run.queuedAt = new Date().toISOString();
+    run.updatedAt = run.queuedAt;
     const { key, queue } = queueForRun(run);
     run.schedulerKey = key;
     queue.push(run.id);
@@ -304,6 +305,7 @@ export function createRuntimeServer({
       at: new Date().toISOString(),
       data
     };
+    run.updatedAt = event.at;
     const serializedEvent = JSON.stringify(event);
     const eventBytes = byteLength(serializedEvent);
     const performanceMetrics = runPerformanceMetrics(run);
@@ -1084,6 +1086,7 @@ export function createRuntimeServer({
       dir: null,
       status: "queued",
       createdAt,
+      updatedAt: createdAt,
       startedAt: null,
       finishedAt: null,
       benchmark: benchmark.id,
@@ -1495,7 +1498,10 @@ export function createRuntimeServer({
       if (req.method === "GET" && url.pathname === "/api/runs") {
         const summaries = [...runs.values()]
           .map((run) => runSummary(run, { includeResults: false }))
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          .sort((a, b) => (
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          ));
         return sendJson(res, 200, { runs: summaries }, { endpoint: "list-runs", runCount: summaries.length });
       }
       if (req.method === "POST" && url.pathname === "/api/runs") {

@@ -78,6 +78,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     providerName: run.providerName || null,
     baseUrl: run.baseUrl,
     createdAt: run.createdAt,
+    updatedAt: run.updatedAt || run.createdAt,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     total: run.total,

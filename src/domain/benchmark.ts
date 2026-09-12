@@ -286,6 +286,7 @@ export type BenchRun = {
   providerName?: string | null;
   baseUrl: string;
   createdAt: string;
+  updatedAt?: string;
   startedAt?: string | null;
   finishedAt?: string | null;
   total: number;

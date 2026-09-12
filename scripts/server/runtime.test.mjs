@@ -539,6 +539,31 @@ describe("runtime server", () => {
     expect(resumedDetail.results[0].modelError).toBeUndefined();
   });
 
+  it("lists a resumed run ahead of more recently created runs", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res) => {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No model loaded." } }));
+      },
+      goodModelHandler
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const first = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await waitForStatus(apiUrl, first.id, ["completed"]);
+    const second = await createRun(apiUrl, model.baseUrl, { testNumbers: "0" });
+    await waitForStatus(apiUrl, second.id, ["completed"]);
+
+    const beforeResume = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
+    expect(beforeResume.runs.map((run) => run.id)).toEqual([second.id, first.id]);
+
+    await fetch(`${apiUrl}/api/runs/${first.id}/resume`, { method: "POST" });
+
+    const afterResume = await fetch(`${apiUrl}/api/runs`).then((response) => response.json());
+    expect(afterResume.runs.map((run) => run.id)).toEqual([first.id, second.id]);
+  });
+
   it("replaces saved request parameters with the current form config on resume", async () => {
     const rootDir = await makeRootDir();
     const originalEndpoint = await startModelServer([
