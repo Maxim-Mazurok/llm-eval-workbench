@@ -26,7 +26,7 @@ describe("detectRepetitionLoop", () => {
       repetitions: 5,
       patternWords: 34,
       matchedWords: 170,
-      detectorVersion: "4"
+      detectorVersion: "5"
     });
     expect(detectRepetitionLoop(text)?.occurrences).toHaveLength(5);
     expect(detectRepetitionLoop(text)?.occurrences[0]).toEqual({
@@ -63,6 +63,26 @@ describe("detectRepetitionLoop", () => {
     expect(detectRepetitionLoop(text)).toBeNull();
   });
 
+  it("detects punctuation-heavy character cycles without enough words", () => {
+    const cycle = "actually, it's '()(( ))(( )( ))' ->";
+    const text = Array.from({ length: 6 }, () => cycle).join("\n");
+    const detection = detectRepetitionLoop(text);
+
+    expect(detection).toMatchObject({
+      detectorVersion: "5",
+      repetitions: 6,
+      patternCharacters: 29,
+      matchedCharacters: 174
+    });
+    expect(detection?.occurrences).toHaveLength(6);
+    expect(text.slice(detection.occurrences[0].start, detection.occurrences[0].end))
+      .toBe(cycle);
+  });
+
+  it("does not inflate a tiny punctuation cycle past the minimum pattern size", () => {
+    expect(detectRepetitionLoop("()".repeat(100))).toBeNull();
+  });
+
   it("aligns a partial trailing cycle to the first complete body", () => {
     const repeatedPoints = `Wait, let's look at the points:
       (-10.12, 71.09)
@@ -75,7 +95,7 @@ describe("detectRepetitionLoop", () => {
     const detection = detectRepetitionLoop(text);
 
     expect(detection).toMatchObject({
-      detectorVersion: "4",
+      detectorVersion: "5",
       repetitions: 6,
       patternWords: 31
     });
@@ -232,7 +252,7 @@ describe("reconstructSavedLoopDetection", () => {
 
     expect(reconstructed).toMatchObject({
       channel: "thinking",
-      detectorVersion: "4",
+      detectorVersion: "5",
       repetitions: 5,
       patternWords: 34
     });

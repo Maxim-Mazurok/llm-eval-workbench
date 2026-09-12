@@ -258,8 +258,10 @@ export type BenchResult = {
     detectorVersion?: string;
     channel: string;
     repetitions: number;
-    patternWords: number;
-    matchedWords: number;
+    patternWords?: number;
+    matchedWords?: number;
+    patternCharacters?: number;
+    matchedCharacters?: number;
     excerpt: string;
     occurrences?: Array<{
       start: number;
