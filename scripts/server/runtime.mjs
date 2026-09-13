@@ -1,7 +1,12 @@
-import { createServer } from "node:http";
 import { promises as fs } from "node:fs";
+import { createServer } from "node:http";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  benchmarks,
+  benchmarkSummaries,
+  getBenchmark,
+} from "./benchmarks/registry.mjs";
 import {
   buildPromptMessages,
   compactResult,
@@ -20,27 +25,30 @@ import {
   resultAttemptId,
   runDirName,
   runHasModelErrorResults,
-  runtimeConfigFromPersistedRun,
   runSummary,
-  syncRunCountsFromResults
+  runtimeConfigFromPersistedRun,
+  syncRunCountsFromResults,
 } from "./domain.mjs";
-import { createProviderStore } from "./providerStore.mjs";
-import { benchmarkSummaries, benchmarks, getBenchmark } from "./benchmarks/registry.mjs";
 import { createLmStudioChatCompletionResponse } from "./lmStudioModel.mjs";
-import { fetchModelResponseWithRetry, throwIfRetryableModelOutput } from "./modelRetry.mjs";
+import {
+  fetchModelResponseWithRetry,
+  throwIfRetryableModelOutput,
+} from "./modelRetry.mjs";
+import { createProviderStore } from "./providerStore.mjs";
 import {
   detectRepetitionLoop,
   detectTokenLimitRepetitionLoop,
   initialRepetitionPenalty,
   LOOP_DETECTION_CONFIG,
   nextAdaptiveRepetitionPenalty,
-  restoreAdaptiveRepetitionPenaltyState
+  restoreAdaptiveRepetitionPenaltyState,
 } from "./repetitionDetector.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // LLM_EVAL_ROOT_DIR relocates benchmark-runs/ and .cache/ (Playwright starts
 // a throwaway server that must never share artifacts with a live one).
-const defaultRootDir = process.env.LLM_EVAL_ROOT_DIR || join(__dirname, "../..");
+const defaultRootDir =
+  process.env.LLM_EVAL_ROOT_DIR || join(__dirname, "../..");
 const LOOP_DETECTION_CHECK_INTERVAL_CHARACTERS = 512;
 
 // Benchmarks that ship binary assets (photographs, audio, ...) expose
@@ -53,7 +61,7 @@ const ASSET_CONTENT_TYPES = new Map([
   ["jpeg", "image/jpeg"],
   ["png", "image/png"],
   ["webp", "image/webp"],
-  ["gif", "image/gif"]
+  ["gif", "image/gif"],
 ]);
 
 export function benchmarkAssetUrl(benchmarkId, file) {
@@ -71,12 +79,13 @@ export function createRuntimeServer({
   fetchImplementation = fetch,
   maxReplayEvents = 5000,
   providerStore: configuredProviderStore,
-  lmStudioClientFactory
+  lmStudioClientFactory,
 } = {}) {
   const cacheDir = join(rootDir, ".cache");
   const configDir = join(rootDir, ".config");
   const runsDir = join(rootDir, "benchmark-runs");
-  const providerStore = configuredProviderStore || createProviderStore({ configDir });
+  const providerStore =
+    configuredProviderStore || createProviderStore({ configDir });
   const runs = new Map();
   const taskLogWriteQueues = new Map();
   // Each saved remote provider gets an independent FIFO and can benchmark at
@@ -140,13 +149,24 @@ export function createRuntimeServer({
   function processQueue() {
     for (const [key, queue] of runQueues) {
       const activeRun = runs.get(activeRunIds.get(key));
-      if (activeRun && !activeRun.deleted && (activeRun.status === "running" || activeRun.status === "queued")) continue;
+      if (
+        activeRun &&
+        !activeRun.deleted &&
+        (activeRun.status === "running" || activeRun.status === "queued")
+      )
+        continue;
       activeRunIds.delete(key);
 
       let nextRun = null;
       while (queue.length && !nextRun) {
         const candidate = runs.get(queue.shift());
-        if (candidate && !candidate.deleted && !candidate.cancelled && candidate.status === "queued") nextRun = candidate;
+        if (
+          candidate &&
+          !candidate.deleted &&
+          !candidate.cancelled &&
+          candidate.status === "queued"
+        )
+          nextRun = candidate;
       }
       syncQueuePositions();
       if (!nextRun) {
@@ -168,7 +188,9 @@ export function createRuntimeServer({
 
   function logPerformance(fields) {
     if (!performanceLogEnabled) return;
-    console.log(`[PERF] ${JSON.stringify({ at: new Date().toISOString(), ...fields })}`);
+    console.log(
+      `[PERF] ${JSON.stringify({ at: new Date().toISOString(), ...fields })}`,
+    );
   }
 
   function runPerformanceMetrics(run) {
@@ -176,7 +198,7 @@ export function createRuntimeServer({
     run.performanceMetrics ??= {
       totalEventCount: 0,
       totalEventBytes: 0,
-      eventTypes: {}
+      eventTypes: {},
     };
     return run.performanceMetrics;
   }
@@ -184,21 +206,22 @@ export function createRuntimeServer({
   function sendJson(res, status, payload, performanceFields = {}) {
     const serializationStartedAt = performance.now();
     const serializedPayload = JSON.stringify(payload);
-    const serializationMilliseconds = performance.now() - serializationStartedAt;
+    const serializationMilliseconds =
+      performance.now() - serializationStartedAt;
     const responseBytes = byteLength(serializedPayload);
     logPerformance({
       type: "json-response",
       status,
       responseBytes,
       serializationMilliseconds: Number(serializationMilliseconds.toFixed(3)),
-      ...performanceFields
+      ...performanceFields,
     });
     res.writeHead(status, {
       "content-type": "application/json; charset=utf-8",
       "content-length": String(responseBytes),
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-      "access-control-allow-headers": "content-type,authorization"
+      "access-control-allow-headers": "content-type,authorization",
     });
     res.end(serializedPayload);
   }
@@ -228,8 +251,14 @@ export function createRuntimeServer({
     ensureRunDir(run);
     await fs.mkdir(run.dir, { recursive: true });
     await Promise.all([
-      writeFileAtomic(join(run.dir, "run.json"), JSON.stringify(persistedRunState(run), null, 2)),
-      writeFileAtomic(join(run.dir, "results.json"), JSON.stringify(run.results, null, 2))
+      writeFileAtomic(
+        join(run.dir, "run.json"),
+        JSON.stringify(persistedRunState(run), null, 2),
+      ),
+      writeFileAtomic(
+        join(run.dir, "results.json"),
+        JSON.stringify(run.results, null, 2),
+      ),
     ]);
   }
 
@@ -267,9 +296,15 @@ export function createRuntimeServer({
     const next = previous.then(async () => {
       if (run.deleted) return;
       await fs.mkdir(run.dir, { recursive: true });
-      await fs.appendFile(join(run.dir, "task-logs.jsonl"), `${JSON.stringify(entry)}\n`);
+      await fs.appendFile(
+        join(run.dir, "task-logs.jsonl"),
+        `${JSON.stringify(entry)}\n`,
+      );
     });
-    taskLogWriteQueues.set(run.id, next.catch(() => {}));
+    taskLogWriteQueues.set(
+      run.id,
+      next.catch(() => {}),
+    );
     await next;
   }
 
@@ -282,16 +317,33 @@ export function createRuntimeServer({
       passTotal: result.passTotal,
       index: result.index,
       entryPoint: result.entryPoint,
-      passed: result.passed
+      passed: result.passed,
     };
     const entries = [
       { ...base, channel: "prompt", text: result.instructionPrompt || "" },
       { ...base, channel: "model-output", text: result.rawOutput || "" },
-      { ...base, channel: "thinking-output", text: result.thinkingOutput || "" },
+      {
+        ...base,
+        channel: "thinking-output",
+        text: result.thinkingOutput || "",
+      },
       { ...base, channel: "extracted-code", text: result.extractedCode || "" },
-      { ...base, channel: "harness", text: result.traceback || result.error || result.harnessStderr || result.harnessStdout || "" }
+      {
+        ...base,
+        channel: "harness",
+        text:
+          result.traceback ||
+          result.error ||
+          result.harnessStderr ||
+          result.harnessStdout ||
+          "",
+      },
     ];
-    await Promise.all(entries.filter((entry) => entry.text).map((entry) => appendTaskLogLine(run, entry)));
+    await Promise.all(
+      entries
+        .filter((entry) => entry.text)
+        .map((entry) => appendTaskLogLine(run, entry)),
+    );
   }
 
   function appendEvent(run, type, data = {}) {
@@ -301,7 +353,7 @@ export function createRuntimeServer({
       id: run.eventSeq,
       type,
       at: new Date().toISOString(),
-      data
+      data,
     };
     const serializedEvent = JSON.stringify(event);
     const eventBytes = byteLength(serializedEvent);
@@ -309,15 +361,20 @@ export function createRuntimeServer({
     if (performanceMetrics) {
       performanceMetrics.totalEventCount += 1;
       performanceMetrics.totalEventBytes += eventBytes;
-      const eventTypeMetrics = performanceMetrics.eventTypes[type] || { count: 0, bytes: 0 };
+      const eventTypeMetrics = performanceMetrics.eventTypes[type] || {
+        count: 0,
+        bytes: 0,
+      };
       performanceMetrics.eventTypes[type] = {
         count: eventTypeMetrics.count + 1,
-        bytes: eventTypeMetrics.bytes + eventBytes
+        bytes: eventTypeMetrics.bytes + eventBytes,
       };
     }
     run.events.push(event);
-    if (run.events.length > maxReplayEvents) run.events.splice(0, run.events.length - maxReplayEvents);
-    if (type !== "token" && type !== "raw" && type !== "raw-delta") persistRunArtifacts(run);
+    if (run.events.length > maxReplayEvents)
+      run.events.splice(0, run.events.length - maxReplayEvents);
+    if (type !== "token" && type !== "raw" && type !== "raw-delta")
+      persistRunArtifacts(run);
     for (const res of run.clients) {
       res.write(`id: ${event.id}\n`);
       res.write(`event: ${type}\n`);
@@ -328,8 +385,9 @@ export function createRuntimeServer({
   function logTerminalRunPerformance(run, status) {
     const performanceMetrics = runPerformanceMetrics(run);
     if (!performanceMetrics) return;
-    const largestEventType = Object.entries(performanceMetrics.eventTypes)
-      .sort(([, left], [, right]) => right.bytes - left.bytes)[0];
+    const largestEventType = Object.entries(performanceMetrics.eventTypes).sort(
+      ([, left], [, right]) => right.bytes - left.bytes,
+    )[0];
     logPerformance({
       type: "run-terminal",
       runId: run.id,
@@ -343,14 +401,23 @@ export function createRuntimeServer({
       tokenEventCount: performanceMetrics.eventTypes.token?.count || 0,
       tokenEventBytes: performanceMetrics.eventTypes.token?.bytes || 0,
       memoryRssBytes: process.memoryUsage().rss,
-      memoryHeapUsedBytes: process.memoryUsage().heapUsed
+      memoryHeapUsedBytes: process.memoryUsage().heapUsed,
     });
   }
 
-  async function readModelResponse(response, run, problem, index, context, started) {
+  async function readModelResponse(
+    response,
+    run,
+    problem,
+    index,
+    context,
+    started,
+  ) {
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => "");
-      throw new Error(`Model request failed: HTTP ${response.status} ${text.slice(0, 1000)}`);
+      throw new Error(
+        `Model request failed: HTTP ${response.status} ${text.slice(0, 1000)}`,
+      );
     }
 
     let output = "";
@@ -367,20 +434,29 @@ export function createRuntimeServer({
       // Streaming responses put tokens in `delta`; a few OpenAI-compatible
       // endpoints accept stream=true but return one ordinary completion with
       // the text in `message` instead. Treat both shapes identically.
-      const responseParts = [choice?.delta, choice?.message]
-        .filter((part) => part && typeof part === "object");
+      const responseParts = [choice?.delta, choice?.message].filter(
+        (part) => part && typeof part === "object",
+      );
       const parts = responseParts.flatMap((part) => extractTextFromDelta(part));
       for (const part of parts) {
         if (part.channel === "output") output += part.text;
         if (part.channel === "thinking") thinking += part.text;
-        appendEvent(run, "token", { taskId: problem.task_id, index, ...context, ...part });
+        appendEvent(run, "token", {
+          taskId: problem.task_id,
+          index,
+          ...context,
+          ...part,
+        });
       }
-      if (!parts.length && responseParts.some((part) => Object.keys(part).length)) {
+      if (
+        !parts.length &&
+        responseParts.some((part) => Object.keys(part).length)
+      ) {
         appendEvent(run, "raw-delta", {
           taskId: problem.task_id,
           index,
           ...context,
-          delta: responseParts.length === 1 ? responseParts[0] : responseParts
+          delta: responseParts.length === 1 ? responseParts[0] : responseParts,
         });
       }
       const detectedLoop = detectStreamLoop();
@@ -393,15 +469,26 @@ export function createRuntimeServer({
         output,
         thinking,
         usage,
-        finishReason: loopDetection && run.adaptiveRepetitionPenalty ? "loop" : finishReason,
+        finishReason:
+          loopDetection && run.adaptiveRepetitionPenalty
+            ? "loop"
+            : finishReason,
         loopDetection,
-        elapsedMs: Date.now() - started
+        elapsedMs: Date.now() - started,
       };
     }
 
     function detectStreamLoop(force = false) {
-      for (const [channel, text] of [["thinking", thinking], ["output", output]]) {
-        if (!force && text.length - lastLoopCheckCharacters[channel] < LOOP_DETECTION_CHECK_INTERVAL_CHARACTERS) continue;
+      for (const [channel, text] of [
+        ["thinking", thinking],
+        ["output", output],
+      ]) {
+        if (
+          !force &&
+          text.length - lastLoopCheckCharacters[channel] <
+            LOOP_DETECTION_CHECK_INTERVAL_CHARACTERS
+        )
+          continue;
         lastLoopCheckCharacters[channel] = text.length;
         const detection = detectRepetitionLoop(text);
         if (detection) return { channel, ...detection };
@@ -416,7 +503,7 @@ export function createRuntimeServer({
         taskId: problem.task_id,
         index,
         ...context,
-        ...loopDetection
+        ...loopDetection,
       });
     }
 
@@ -427,12 +514,16 @@ export function createRuntimeServer({
     if (contentType.includes("application/json")) {
       const parsed = await response.json();
       const detectedLoop = consumeCompletionPayload(parsed);
-      recordLoopDetection(detectStreamLoop(true) || detectTokenLimitRepetitionLoop({
-        thinking,
-        output,
-        finishReason
-      }));
-      if (loopDetection && run.adaptiveRepetitionPenalty) return responseResult();
+      recordLoopDetection(
+        detectStreamLoop(true) ||
+          detectTokenLimitRepetitionLoop({
+            thinking,
+            output,
+            finishReason,
+          }),
+      );
+      if (loopDetection && run.adaptiveRepetitionPenalty)
+        return responseResult();
       throwIfRetryableModelOutput(thinking, output);
       if (!finishReason) finishReason = "stop";
       return responseResult();
@@ -455,7 +546,12 @@ export function createRuntimeServer({
         try {
           parsed = JSON.parse(payload);
         } catch {
-          appendEvent(run, "raw", { taskId: problem.task_id, index, ...context, text: payload });
+          appendEvent(run, "raw", {
+            taskId: problem.task_id,
+            index,
+            ...context,
+            text: payload,
+          });
           continue;
         }
         const detectedLoop = consumeCompletionPayload(parsed);
@@ -480,11 +576,14 @@ export function createRuntimeServer({
     // not discard a charged completion merely because its last frame arrived
     // immediately before the connection closed.
     processFrame(buffer);
-    recordLoopDetection(detectStreamLoop(true) || detectTokenLimitRepetitionLoop({
-      thinking,
-      output,
-      finishReason
-    }));
+    recordLoopDetection(
+      detectStreamLoop(true) ||
+        detectTokenLimitRepetitionLoop({
+          thinking,
+          output,
+          finishReason,
+        }),
+    );
     if (loopDetection && run.adaptiveRepetitionPenalty) return responseResult();
     throwIfRetryableModelOutput(thinking, output);
     if (!receivedDoneMarker && !finishReason) {
@@ -506,7 +605,7 @@ export function createRuntimeServer({
       return {
         file,
         postedAt: image.postedAt ?? null,
-        url: benchmarkAssetUrl(benchmark.id, file)
+        url: benchmarkAssetUrl(benchmark.id, file),
       };
     });
   }
@@ -524,12 +623,14 @@ export function createRuntimeServer({
       const bytes = await fs.readFile(image.file);
       parts.push({
         type: "image_url",
-        image_url: { url: `data:image/jpeg;base64,${bytes.toString("base64")}` }
+        image_url: {
+          url: `data:image/jpeg;base64,${bytes.toString("base64")}`,
+        },
       });
     }
-    return messages.map((message, messageIndex) => (
-      messageIndex === lastIndex ? { ...message, content: parts } : message
-    ));
+    return messages.map((message, messageIndex) =>
+      messageIndex === lastIndex ? { ...message, content: parts } : message,
+    );
   }
 
   async function callModel(run, problem, index, context = {}) {
@@ -537,36 +638,55 @@ export function createRuntimeServer({
     run.abortControllers ??= new Set();
     run.abortControllers.add(controller);
     run.abortController = controller;
-    const messages = buildPromptMessages(problem, run.systemPrompt, run.promptTemplate);
+    const messages = buildPromptMessages(
+      problem,
+      run.systemPrompt,
+      run.promptTemplate,
+    );
     const wireMessages = await attachProblemImages(messages, problem);
-    // OMLX caps reasoning with `thinking_budget` but still counts those tokens
-    // against `max_tokens`, so the request budget is thinking plus output.
-    const thinkingBudget = run.thinkingEnabled ? normalizeTokenCount(run.thinkingBudget, 0) : 0;
+    // The model server caps reasoning with `thinking_budget` but still counts
+    // those tokens against `max_tokens`, so the request budget is both parts.
+    const thinkingBudget = run.thinkingEnabled
+      ? normalizeTokenCount(run.thinkingBudget, 0)
+      : 0;
     const body = {
       model: run.model,
       messages: wireMessages,
       stream: true,
       temperature: run.temperature,
       max_tokens: thinkingBudget + run.maxOutputTokens,
-      enable_thinking: run.thinkingEnabled,
-      chat_template_kwargs: { enable_thinking: run.thinkingEnabled },
-      stream_options: { include_usage: true }
+      stream_options: { include_usage: true },
     };
-    if (run.extraBody && Object.keys(run.extraBody).length) Object.assign(body, run.extraBody);
-    if (run.thinkingEnabled) body.thinking_budget = thinkingBudget;
+    if (run.usesSlotstreamApi) {
+      body.reasoning_effort = run.thinkingEnabled ? "max" : "none";
+    } else {
+      body.enable_thinking = run.thinkingEnabled;
+      body.chat_template_kwargs = { enable_thinking: run.thinkingEnabled };
+    }
+    if (run.extraBody && Object.keys(run.extraBody).length)
+      Object.assign(body, run.extraBody);
+    if (run.thinkingEnabled)
+      body.thinking_budget = thinkingBudget;
     else delete body.thinking_budget;
-    if (!Number.isFinite(Number(body.repetition_penalty)) || Number(body.repetition_penalty) <= 0) {
+    if (
+      !Number.isFinite(Number(body.repetition_penalty)) ||
+      Number(body.repetition_penalty) <= 0
+    ) {
       delete body.repetition_penalty;
     }
-    if (Number.isFinite(context.repetitionPenalty)) body.repetition_penalty = context.repetitionPenalty;
+    if (Number.isFinite(context.repetitionPenalty))
+      body.repetition_penalty = context.repetitionPenalty;
     const lmStudioPredictionConfig = {
-      maxTokens: normalizeTokenCount(body.max_tokens, thinkingBudget + run.maxOutputTokens),
+      maxTokens: normalizeTokenCount(
+        body.max_tokens,
+        thinkingBudget + run.maxOutputTokens,
+      ),
       reasoningBudget: thinkingBudget,
       enableThinking: run.thinkingEnabled,
       temperature: Number(body.temperature),
       ...(Number.isFinite(Number(body.repetition_penalty))
         ? { repeatPenalty: Number(body.repetition_penalty) }
-        : {})
+        : {}),
     };
 
     appendEvent(run, "prompt", {
@@ -578,39 +698,55 @@ export function createRuntimeServer({
         ? { imageFiles: problem.images.map((image) => image.file) }
         : {}),
       request: run.usesLmStudioSdk
-        ? { transport: "lmstudio-sdk", model: run.model, messages, predictionConfig: lmStudioPredictionConfig }
-        : { ...body, messages }
+        ? {
+            transport: "lmstudio-sdk",
+            model: run.model,
+            messages,
+            predictionConfig: lmStudioPredictionConfig,
+          }
+        : { ...body, messages },
     });
     const started = Date.now();
     try {
       return await fetchModelResponseWithRetry({
         fetchImplementation: run.usesLmStudioSdk
-          ? () => createLmStudioChatCompletionResponse({
-              baseUrl: run.baseUrl,
-              apiKey: run.apiKey,
-              model: run.model,
-              messages,
-              predictionConfig: lmStudioPredictionConfig,
-              signal: controller.signal,
-              clientFactory: lmStudioClientFactory
-            })
+          ? () =>
+              createLmStudioChatCompletionResponse({
+                baseUrl: run.baseUrl,
+                apiKey: run.apiKey,
+                model: run.model,
+                messages,
+                predictionConfig: lmStudioPredictionConfig,
+                signal: controller.signal,
+                clientFactory: lmStudioClientFactory,
+              })
           : fetchImplementation,
-        requestUrl: run.usesLmStudioSdk ? run.baseUrl : `${run.baseUrl}/chat/completions`,
+        requestUrl: run.usesLmStudioSdk
+          ? run.baseUrl
+          : `${run.baseUrl}/chat/completions`,
         requestOptions: {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            ...(run.apiKey ? { authorization: `Bearer ${run.apiKey}` } : {})
+            ...(run.apiKey ? { authorization: `Bearer ${run.apiKey}` } : {}),
           },
           body: JSON.stringify(body),
-          signal: controller.signal
+          signal: controller.signal,
         },
         signal: controller.signal,
         shouldStop: () => run.cancelled,
-        processResponse: (response) => readModelResponse(response, run, problem, index, context, started),
+        processResponse: (response) =>
+          readModelResponse(response, run, problem, index, context, started),
         onRetry: ({ attemptNumber, errorMessage, retryDelayMilliseconds }) => {
-          appendEvent(run, "model-retry", { taskId: problem.task_id, index, ...context, attemptNumber, error: errorMessage, retryDelayMilliseconds });
-        }
+          appendEvent(run, "model-retry", {
+            taskId: problem.task_id,
+            index,
+            ...context,
+            attemptNumber,
+            error: errorMessage,
+            retryDelayMilliseconds,
+          });
+        },
       });
     } finally {
       run.abortControllers?.delete(controller);
@@ -632,8 +768,14 @@ export function createRuntimeServer({
         : (() => {
             const start = normalizeTaskCount(run.startIndex);
             const sampleLimit = normalizeTaskCount(run.sampleLimit);
-            const end = sampleLimit > 0 ? Math.min(allProblems.length, start + sampleLimit) : allProblems.length;
-            return Array.from({ length: Math.max(0, end - start) }, (_, offset) => start + offset);
+            const end =
+              sampleLimit > 0
+                ? Math.min(allProblems.length, start + sampleLimit)
+                : allProblems.length;
+            return Array.from(
+              { length: Math.max(0, end - start) },
+              (_, offset) => start + offset,
+            );
           })();
       run.selectedIndices = selectedIndices;
       run.datasetSize = allProblems.length;
@@ -644,32 +786,50 @@ export function createRuntimeServer({
       syncRunCountsFromResults(run);
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
-      const completedAttemptIds = new Set(run.results.map(resultAttemptId).filter(Boolean));
+      const completedAttemptIds = new Set(
+        run.results.map(resultAttemptId).filter(Boolean),
+      );
       appendEvent(run, "run-started", {
         summary: runSummary(run, { includeResults: false }),
         datasetSize: allProblems.length,
-        passCount
+        passCount,
       });
 
       async function finishTask(result) {
-        run.activeTaskIds = (run.activeTaskIds || []).filter((taskId) => taskId !== result.taskId);
+        run.activeTaskIds = (run.activeTaskIds || []).filter(
+          (taskId) => taskId !== result.taskId,
+        );
         delete run.activeTaskStartedAt?.[result.taskId];
-        run.currentTaskId = run.activeTaskIds[run.activeTaskIds.length - 1] || null;
+        run.currentTaskId =
+          run.activeTaskIds[run.activeTaskIds.length - 1] || null;
         run.results.push(result);
         await appendTaskLogs(run, result);
         run.completed += 1;
         if (result.passed) run.passed += 1;
         else run.failed += 1;
-        appendEvent(run, "task-finished", { result: compactResult(result), summary: runSummary(run, { includeResults: false }) });
+        appendEvent(run, "task-finished", {
+          result: compactResult(result),
+          summary: runSummary(run, { includeResults: false }),
+        });
       }
 
-      async function runTask({ problem, index, ordinal, passNumber, passOrdinal, passTotal, attemptId }) {
+      async function runTask({
+        problem,
+        index,
+        ordinal,
+        passNumber,
+        passOrdinal,
+        passTotal,
+        attemptId,
+      }) {
         if (run.cancelled) throw new Error("Run cancelled.");
         const taskStartedAtMilliseconds = Date.now();
-        run.activeTaskIds = [...new Set([...(run.activeTaskIds || []), problem.task_id])];
+        run.activeTaskIds = [
+          ...new Set([...(run.activeTaskIds || []), problem.task_id]),
+        ];
         run.activeTaskStartedAt = {
           ...(run.activeTaskStartedAt || {}),
-          [problem.task_id]: new Date(taskStartedAtMilliseconds).toISOString()
+          [problem.task_id]: new Date(taskStartedAtMilliseconds).toISOString(),
         };
         run.currentTaskId = problem.task_id;
         const context = {
@@ -677,7 +837,9 @@ export function createRuntimeServer({
           passNumber,
           passTotal,
           passOrdinal,
-          ...(run.adaptiveRepetitionPenalty ? { repetitionPenalty: run.currentRepetitionPenalty } : {})
+          ...(run.adaptiveRepetitionPenalty
+            ? { repetitionPenalty: run.currentRepetitionPenalty }
+            : {}),
         };
         appendEvent(run, "task-started", {
           taskId: problem.task_id,
@@ -690,8 +852,10 @@ export function createRuntimeServer({
           subtask: problem.subtask,
           prompt: problem.prompt,
           test: benchmark.problemReference(problem),
-          ...(problemImageRefs(benchmark, problem) ? { images: problemImageRefs(benchmark, problem) } : {}),
-          summary: runSummary(run, { includeResults: false })
+          ...(problemImageRefs(benchmark, problem)
+            ? { images: problemImageRefs(benchmark, problem) }
+            : {}),
+          summary: runSummary(run, { includeResults: false }),
         });
         try {
           let generation;
@@ -699,13 +863,16 @@ export function createRuntimeServer({
             generation = await callModel(run, problem, index, context);
           } catch (error) {
             if (run.cancelled) throw error;
-            if (error instanceof Error && error.name === "IncompleteModelResponseError") {
+            if (
+              error instanceof Error &&
+              error.name === "IncompleteModelResponseError"
+            ) {
               appendEvent(run, "task-invalidated", {
                 taskId: problem.task_id,
                 index,
                 ...context,
                 reason: error.message,
-                summary: runSummary(run, { includeResults: false })
+                summary: runSummary(run, { includeResults: false }),
               });
               throw error;
             }
@@ -720,10 +887,22 @@ export function createRuntimeServer({
               passed: false,
               score: 0,
               answerScore: 0,
-              modelError: error instanceof Error ? error.message : String(error),
-              ...(problemImageRefs(benchmark, problem) ? { images: problemImageRefs(benchmark, problem) } : {}),
+              modelError:
+                error instanceof Error ? error.message : String(error),
+              ...(problemImageRefs(benchmark, problem)
+                ? { images: problemImageRefs(benchmark, problem) }
+                : {}),
               tests: [],
-              instructionPrompt: buildPromptMessages(problem, run.systemPrompt, run.promptTemplate).map((message) => `${message.role.toUpperCase()}:\n${message.content}`).join("\n\n"),
+              instructionPrompt: buildPromptMessages(
+                problem,
+                run.systemPrompt,
+                run.promptTemplate,
+              )
+                .map(
+                  (message) =>
+                    `${message.role.toUpperCase()}:\n${message.content}`,
+                )
+                .join("\n\n"),
               prompt: problem.prompt,
               test: benchmark.problemReference(problem),
               rawOutput: "",
@@ -731,22 +910,29 @@ export function createRuntimeServer({
               extractedCode: "",
               usage: null,
               finishReason: null,
-              ...(run.adaptiveRepetitionPenalty ? { repetitionPenalty: context.repetitionPenalty } : {}),
+              ...(run.adaptiveRepetitionPenalty
+                ? { repetitionPenalty: context.repetitionPenalty }
+                : {}),
               generationMs: Date.now() - taskStartedAtMilliseconds,
-              activeDurationMilliseconds: Date.now() - taskStartedAtMilliseconds
+              activeDurationMilliseconds:
+                Date.now() - taskStartedAtMilliseconds,
             };
             await finishTask(result);
             return;
           }
           if (run.adaptiveRepetitionPenalty) {
             const testedRepetitionPenalties = run.results
-              .filter((result) => Number.isFinite(result.repetitionPenalty) && !result.modelError)
+              .filter(
+                (result) =>
+                  Number.isFinite(result.repetitionPenalty) &&
+                  !result.modelError,
+              )
               .map((result) => result.repetitionPenalty);
             const nextPenaltyState = nextAdaptiveRepetitionPenalty({
               repetitionPenalty: context.repetitionPenalty,
               knownLoopingPenalty: run.knownLoopingPenalty,
               testedRepetitionPenalties,
-              looping: Boolean(generation.loopDetection)
+              looping: Boolean(generation.loopDetection),
             });
             run.currentRepetitionPenalty = nextPenaltyState.repetitionPenalty;
             run.knownLoopingPenalty = nextPenaltyState.knownLoopingPenalty;
@@ -756,7 +942,7 @@ export function createRuntimeServer({
               ...context,
               looping: Boolean(generation.loopDetection),
               nextRepetitionPenalty: run.currentRepetitionPenalty,
-              knownLoopingPenalty: run.knownLoopingPenalty
+              knownLoopingPenalty: run.knownLoopingPenalty,
             });
           }
           if (run.adaptiveRepetitionPenalty && generation.loopDetection) {
@@ -773,10 +959,23 @@ export function createRuntimeServer({
               answerScore: 0,
               looping: true,
               loopDetection: generation.loopDetection,
-              ...(run.adaptiveRepetitionPenalty ? { repetitionPenalty: context.repetitionPenalty } : {}),
-              ...(problemImageRefs(benchmark, problem) ? { images: problemImageRefs(benchmark, problem) } : {}),
+              ...(run.adaptiveRepetitionPenalty
+                ? { repetitionPenalty: context.repetitionPenalty }
+                : {}),
+              ...(problemImageRefs(benchmark, problem)
+                ? { images: problemImageRefs(benchmark, problem) }
+                : {}),
               tests: [],
-              instructionPrompt: buildPromptMessages(problem, run.systemPrompt, run.promptTemplate).map((message) => `${message.role.toUpperCase()}:\n${message.content}`).join("\n\n"),
+              instructionPrompt: buildPromptMessages(
+                problem,
+                run.systemPrompt,
+                run.promptTemplate,
+              )
+                .map(
+                  (message) =>
+                    `${message.role.toUpperCase()}:\n${message.content}`,
+                )
+                .join("\n\n"),
               prompt: problem.prompt,
               test: benchmark.problemReference(problem),
               rawOutput: generation.output,
@@ -785,21 +984,31 @@ export function createRuntimeServer({
               usage: generation.usage,
               finishReason: generation.finishReason,
               generationMs: generation.elapsedMs,
-              activeDurationMilliseconds: Date.now() - taskStartedAtMilliseconds
+              activeDurationMilliseconds:
+                Date.now() - taskStartedAtMilliseconds,
             };
             await finishTask(result);
             return;
           }
-          const extractedCode = benchmark.extractArtifact(generation.output, problem);
-          appendEvent(run, "code-extracted", { taskId: problem.task_id, index, ...context, code: extractedCode });
+          const extractedCode = benchmark.extractArtifact(
+            generation.output,
+            problem,
+          );
+          appendEvent(run, "code-extracted", {
+            taskId: problem.task_id,
+            index,
+            ...context,
+            code: extractedCode,
+          });
           const evaluationStartedAtMilliseconds = Date.now();
           const testResult = await benchmark.evaluate({
             problem,
             artifact: extractedCode,
             rawOutput: generation.output,
-            timeoutSeconds: run.timeoutSeconds
+            timeoutSeconds: run.timeoutSeconds,
           });
-          const evaluationDurationMilliseconds = Date.now() - evaluationStartedAtMilliseconds;
+          const evaluationDurationMilliseconds =
+            Date.now() - evaluationStartedAtMilliseconds;
           const result = {
             taskId: problem.task_id,
             attemptId,
@@ -814,8 +1023,13 @@ export function createRuntimeServer({
             score: normalizeTaskScore(testResult.score, testResult.passed),
             // Answer quality before confidence weighting; drives the
             // pass/partial/fail status so honest-but-wrong stays red.
-            answerScore: normalizeTaskScore(testResult.answerScore ?? testResult.score, testResult.passed),
-            ...(problemImageRefs(benchmark, problem) ? { images: problemImageRefs(benchmark, problem) } : {}),
+            answerScore: normalizeTaskScore(
+              testResult.answerScore ?? testResult.score,
+              testResult.passed,
+            ),
+            ...(problemImageRefs(benchmark, problem)
+              ? { images: problemImageRefs(benchmark, problem) }
+              : {}),
             tests: testResult.tests || [],
             expectedAnswer: testResult.expectedAnswer,
             stdout: testResult.stdout || "",
@@ -825,25 +1039,41 @@ export function createRuntimeServer({
             error: testResult.error || null,
             traceback: testResult.traceback || null,
             timeout: Boolean(testResult.timeout),
-            instructionPrompt: buildPromptMessages(problem, run.systemPrompt, run.promptTemplate).map((message) => `${message.role.toUpperCase()}:\n${message.content}`).join("\n\n"),
+            instructionPrompt: buildPromptMessages(
+              problem,
+              run.systemPrompt,
+              run.promptTemplate,
+            )
+              .map(
+                (message) =>
+                  `${message.role.toUpperCase()}:\n${message.content}`,
+              )
+              .join("\n\n"),
             prompt: problem.prompt,
             test: benchmark.problemReference(problem),
             rawOutput: generation.output,
             thinkingOutput: generation.thinking,
             extractedCode,
-            ...(generation.loopDetection ? { loopDetection: generation.loopDetection } : {}),
+            ...(generation.loopDetection
+              ? { loopDetection: generation.loopDetection }
+              : {}),
             usage: generation.usage,
             finishReason: generation.finishReason,
-            ...(run.adaptiveRepetitionPenalty ? { repetitionPenalty: context.repetitionPenalty } : {}),
+            ...(run.adaptiveRepetitionPenalty
+              ? { repetitionPenalty: context.repetitionPenalty }
+              : {}),
             generationMs: generation.elapsedMs,
             evaluationDurationMilliseconds,
-            activeDurationMilliseconds: Date.now() - taskStartedAtMilliseconds
+            activeDurationMilliseconds: Date.now() - taskStartedAtMilliseconds,
           };
           await finishTask(result);
         } finally {
-          run.activeTaskIds = (run.activeTaskIds || []).filter((taskId) => taskId !== problem.task_id);
+          run.activeTaskIds = (run.activeTaskIds || []).filter(
+            (taskId) => taskId !== problem.task_id,
+          );
           delete run.activeTaskStartedAt?.[problem.task_id];
-          run.currentTaskId = run.activeTaskIds[run.activeTaskIds.length - 1] || null;
+          run.currentTaskId =
+            run.activeTaskIds[run.activeTaskIds.length - 1] || null;
         }
       }
 
@@ -868,25 +1098,39 @@ export function createRuntimeServer({
             passOrdinal,
             passNumber,
             passTotal: passCount,
-            attemptId: `${problem.task_id}::pass-${passNumber}`
+            attemptId: `${problem.task_id}::pass-${passNumber}`,
           };
         });
-        const remainingTasks = tasks.filter((task) => !completedAttemptIds.has(task.attemptId));
+        const remainingTasks = tasks.filter(
+          (task) => !completedAttemptIds.has(task.attemptId),
+        );
         if (!remainingTasks.length) continue;
-        const workerCount = Math.min(run.parallelTasks || 1, remainingTasks.length || 1);
+        const workerCount = Math.min(
+          run.parallelTasks || 1,
+          remainingTasks.length || 1,
+        );
         let nextTask = 0;
         const getNextTaskIndex = () => {
           const taskIndex = nextTask;
           nextTask += 1;
           return taskIndex;
         };
-        await Promise.all(Array.from({ length: workerCount }, () => runWorker(remainingTasks, getNextTaskIndex)));
-        if (run.requestedStopMode === "after-task" || run.requestedStopMode === "after-pass") {
+        await Promise.all(
+          Array.from({ length: workerCount }, () =>
+            runWorker(remainingTasks, getNextTaskIndex),
+          ),
+        );
+        if (
+          run.requestedStopMode === "after-task" ||
+          run.requestedStopMode === "after-pass"
+        ) {
           const requestedStopMode = run.requestedStopMode;
           run.cancelled = true;
-          throw new Error(requestedStopMode === "after-task"
-            ? "Run stopped after current task."
-            : "Run stopped after current pass.");
+          throw new Error(
+            requestedStopMode === "after-task"
+              ? "Run stopped after current task."
+              : "Run stopped after current pass.",
+          );
         }
       }
       run.status = "completed";
@@ -894,7 +1138,9 @@ export function createRuntimeServer({
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
       run.currentTaskId = null;
-      appendEvent(run, "done", { summary: runSummary(run, { includeResults: false }) });
+      appendEvent(run, "done", {
+        summary: runSummary(run, { includeResults: false }),
+      });
       logTerminalRunPerformance(run, run.status);
       persistRunArtifacts(run);
     } catch (error) {
@@ -904,7 +1150,10 @@ export function createRuntimeServer({
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
       run.currentTaskId = null;
-      appendEvent(run, "error", { message: error instanceof Error ? error.message : String(error), summary: runSummary(run, { includeResults: false }) });
+      appendEvent(run, "error", {
+        message: error instanceof Error ? error.message : String(error),
+        summary: runSummary(run, { includeResults: false }),
+      });
       logTerminalRunPerformance(run, run.status);
       persistRunArtifacts(run);
     }
@@ -919,14 +1168,17 @@ export function createRuntimeServer({
       const origin = new URL(baseUrl).origin;
       const response = await fetchImplementation(`${origin}/admin/api/models`, {
         signal: AbortSignal.timeout(2000),
-        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       });
       if (!response.ok) return null;
       const payload = await response.json();
       if (!Array.isArray(payload?.models)) return null;
       const types = new Map();
       for (const model of payload.models) {
-        if (typeof model?.id === "string" && typeof model?.model_type === "string") {
+        if (
+          typeof model?.id === "string" &&
+          typeof model?.model_type === "string"
+        ) {
           types.set(model.id, model.model_type);
         }
       }
@@ -941,39 +1193,53 @@ export function createRuntimeServer({
       const origin = new URL(baseUrl).origin;
       const response = await fetchImplementation(`${origin}/api/v1/models`, {
         signal: AbortSignal.timeout(2000),
-        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       });
       if (!response.ok) return null;
       const payload = await response.json();
       if (!Array.isArray(payload?.models)) return null;
       const normalizedModelId = String(modelId || "").trim();
-      return payload.models.find((modelInfo) => (
-        modelInfo?.key === normalizedModelId
-        || modelInfo?.loaded_instances?.some((instance) => instance?.id === normalizedModelId)
-      )) ?? null;
+      return (
+        payload.models.find(
+          (modelInfo) =>
+            modelInfo?.key === normalizedModelId ||
+            modelInfo?.loaded_instances?.some(
+              (instance) => instance?.id === normalizedModelId,
+            ),
+        ) ?? null
+      );
     } catch {
       return null;
     }
   }
 
-  async function usesLmStudioSdkForThinking(baseUrl, modelId, thinkingEnabled, apiKey, providerName) {
+  async function usesLmStudioSdkForThinking(
+    baseUrl,
+    modelId,
+    thinkingEnabled,
+    apiKey,
+    providerName,
+  ) {
     if (!thinkingEnabled) return false;
-    const namedLmStudioProvider = String(providerName || "").toLowerCase().includes("lm studio");
+    const namedLmStudioProvider = String(providerName || "")
+      .toLowerCase()
+      .includes("lm studio");
     const endpointUrl = new URL(baseUrl);
-    if (!namedLmStudioProvider && (providerName || endpointUrl.port !== "1234")) return false;
+    if (!namedLmStudioProvider && (providerName || endpointUrl.port !== "1234"))
+      return false;
     const modelInfo = await fetchLmStudioModelInfo(baseUrl, modelId, apiKey);
     if (!modelInfo) {
       if (!namedLmStudioProvider) return false;
       throw new Error(
-        `Could not verify model "${modelId}" through LM Studio's model metadata API. `
-        + "Make sure LM Studio is running, the model is loaded, and its server is up to date."
+        `Could not verify model "${modelId}" through LM Studio's model metadata API. ` +
+          "Make sure LM Studio is running, the model is loaded, and its server is up to date.",
       );
     }
     if (modelInfo.format !== "gguf") {
       throw new Error(
-        `Model "${modelId}" is loaded in LM Studio as ${modelInfo.format || "an unknown format"}. `
-        + "Numeric reasoning budgets require a GGUF model on the llama.cpp runtime. "
-        + "Load the GGUF variant or turn off thinking."
+        `Model "${modelId}" is loaded in LM Studio as ${modelInfo.format || "an unknown format"}. ` +
+          "Numeric reasoning budgets require a GGUF model on the llama.cpp runtime. " +
+          "Load the GGUF variant or turn off thinking.",
       );
     }
     return true;
@@ -983,29 +1249,48 @@ export function createRuntimeServer({
   // them and the model answers from the text alone ("we cannot see the
   // photo"), producing garbage scores that look like a completed run. Refuse
   // up front whenever the capability is knowable.
-  async function assertModelCanSeeImages(baseUrl, modelId, benchmark, problems, apiKey) {
-    if (!problems.some((problem) => Array.isArray(problem.images) && problem.images.length)) return;
+  async function assertModelCanSeeImages(
+    baseUrl,
+    modelId,
+    benchmark,
+    problems,
+    apiKey,
+  ) {
+    if (
+      !problems.some(
+        (problem) => Array.isArray(problem.images) && problem.images.length,
+      )
+    )
+      return;
     const modelTypes = await fetchModelTypes(baseUrl, apiKey);
     const modelType = modelTypes?.get(String(modelId || "").trim());
     if (modelType !== undefined && modelType !== "vlm") {
       throw new Error(
-        `Model "${modelId}" is not a vision model (oMLX model_type "${modelType}") — `
-        + `"${benchmark.label}" attaches photographs to every call, and a text-only model `
-        + "silently ignores them, so every score would be garbage. Pick a model listed as "
-        + 'model_type "vlm" (the model dropdown tags them "vision").'
+        `Model "${modelId}" is not a vision model (oMLX model_type "${modelType}") — ` +
+          `"${benchmark.label}" attaches photographs to every call, and a text-only model ` +
+          "silently ignores them, so every score would be garbage. Pick a model listed as " +
+          'model_type "vlm" (the model dropdown tags them "vision").',
       );
     }
   }
 
-  async function assertVlmRunModelSupportsThinking(baseUrl, modelId, thinkingEnabled, apiKey) {
+  async function assertVlmRunModelSupportsThinking(
+    baseUrl,
+    modelId,
+    thinkingEnabled,
+    apiKey,
+  ) {
     if (!thinkingEnabled) return;
     const endpointUrl = new URL(baseUrl);
     if (endpointUrl.hostname !== "gateway.vlm.run") return;
     try {
-      const modelDetailsUrl = new URL(`/v1/models/${encodeURIComponent(String(modelId || "").trim())}`, endpointUrl.origin);
+      const modelDetailsUrl = new URL(
+        `/v1/models/${encodeURIComponent(String(modelId || "").trim())}`,
+        endpointUrl.origin,
+      );
       const response = await fetchImplementation(modelDetailsUrl, {
         signal: AbortSignal.timeout(3000),
-        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       });
       if (!response.ok) return;
       const payload = await response.json();
@@ -1014,27 +1299,38 @@ export function createRuntimeServer({
         "enable_thinking",
         "reasoning_effort",
         "thinking_budget",
-        "chat_template_kwargs"
+        "chat_template_kwargs",
       ]);
-      if (payload.supported_parameters.some((parameter) => thinkingParameters.has(parameter))) return;
+      if (
+        payload.supported_parameters.some((parameter) =>
+          thinkingParameters.has(parameter),
+        )
+      )
+        return;
       throw new Error(
-        `Model "${modelId}" on gateway.vlm.run does not support thinking. Its live model metadata lists `
-        + `only: ${payload.supported_parameters.join(", ") || "no request parameters"}. `
-        + "Turn off thinking or use an endpoint that supports enable_thinking."
+        `Model "${modelId}" on gateway.vlm.run does not support thinking. Its live model metadata lists ` +
+          `only: ${payload.supported_parameters.join(", ") || "no request parameters"}. ` +
+          "Turn off thinking or use an endpoint that supports enable_thinking.",
       );
     } catch (error) {
-      if (error instanceof Error && error.message.includes("does not support thinking")) throw error;
+      if (
+        error instanceof Error &&
+        error.message.includes("does not support thinking")
+      )
+        throw error;
     }
   }
 
   async function resolveProviderConfig(config, run = null) {
-    const providerId = String(config.providerId ?? run?.providerId ?? "").trim();
+    const providerId = String(
+      config.providerId ?? run?.providerId ?? "",
+    ).trim();
     if (!providerId) {
       return {
         providerId: null,
         providerName: null,
         baseUrl: normalizeBaseUrl(config.baseUrl ?? run?.baseUrl),
-        apiKey: String(config.apiKey ?? run?.apiKey ?? "").trim()
+        apiKey: String(config.apiKey ?? run?.apiKey ?? "").trim(),
       };
     }
     const provider = await providerStore.resolve(providerId);
@@ -1042,42 +1338,66 @@ export function createRuntimeServer({
       providerId: provider.id,
       providerName: provider.name,
       baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey
+      apiKey: provider.apiKey,
     };
   }
 
   async function createRun(config) {
-    const { baseUrl, apiKey, providerId, providerName } = await resolveProviderConfig(config);
+    const { baseUrl, apiKey, providerId, providerName } =
+      await resolveProviderConfig(config);
     const benchmark = getBenchmark(config.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
-    await assertModelCanSeeImages(baseUrl, config.model, benchmark, allProblems, apiKey);
+    await assertModelCanSeeImages(
+      baseUrl,
+      config.model,
+      benchmark,
+      allProblems,
+      apiKey,
+    );
     await assertVlmRunModelSupportsThinking(
       baseUrl,
       config.model,
       config.thinkingEnabled !== false,
-      apiKey
+      apiKey,
     );
     const usesLmStudioSdk = await usesLmStudioSdkForThinking(
       baseUrl,
       config.model,
       config.thinkingEnabled !== false,
       apiKey,
-      providerName
+      providerName,
     );
-    const selectedIndices = parseTestNumbers(config.testNumbers, allProblems.length, benchmark.taskIdPattern);
+    const usesSlotstreamApi = String(providerName || "")
+      .toLowerCase()
+      .includes("slotstream");
+    const selectedIndices = parseTestNumbers(
+      config.testNumbers,
+      allProblems.length,
+      benchmark.taskIdPattern,
+    );
     const adaptiveRepetitionPenalty = Boolean(config.adaptiveRepetitionPenalty);
     const repetitionPenalty = Number(config.repetitionPenalty ?? 1);
-    if (adaptiveRepetitionPenalty && (!Number.isFinite(repetitionPenalty) || repetitionPenalty <= 0)) {
+    if (
+      adaptiveRepetitionPenalty &&
+      (!Number.isFinite(repetitionPenalty) || repetitionPenalty <= 0)
+    ) {
       throw new Error("Starting repetition penalty must be greater than zero.");
     }
-    const parallelTasks = adaptiveRepetitionPenalty ? 1 : normalizeParallelTasks(config.parallelTasks);
+    const parallelTasks = adaptiveRepetitionPenalty
+      ? 1
+      : normalizeParallelTasks(config.parallelTasks);
     const passCount = normalizePassCount(config.passCount);
     const startIndex = normalizeTaskCount(config.startIndex);
     const sampleLimit = normalizeTaskCount(config.sampleLimit);
-    const plannedTaskCount = selectedIndices.length || (() => {
-      const end = sampleLimit > 0 ? Math.min(allProblems.length, startIndex + sampleLimit) : allProblems.length;
-      return Math.max(0, end - startIndex);
-    })();
+    const plannedTaskCount =
+      selectedIndices.length ||
+      (() => {
+        const end =
+          sampleLimit > 0
+            ? Math.min(allProblems.length, startIndex + sampleLimit)
+            : allProblems.length;
+        return Math.max(0, end - startIndex);
+      })();
     const id = `${benchmark.id === "humaneval" ? "he" : benchmark.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const createdAt = new Date().toISOString();
     const run = {
@@ -1096,6 +1416,7 @@ export function createRuntimeServer({
       baseUrl,
       apiKey,
       usesLmStudioSdk,
+      usesSlotstreamApi,
       temperature: Number(config.temperature ?? 0),
       maxOutputTokens: normalizeTokenCount(config.maxOutputTokens, 2048),
       thinkingEnabled: config.thinkingEnabled !== false,
@@ -1106,12 +1427,22 @@ export function createRuntimeServer({
       sampleLimit,
       startIndex,
       selectedIndices,
-      systemPrompt: String(config.systemPrompt ?? benchmark.defaultSystemPrompt),
-      promptTemplate: String(config.promptTemplate ?? benchmark.defaultPromptTemplate),
-      extraBody: config.extraBody && typeof config.extraBody === "object" ? config.extraBody : {},
+      systemPrompt: String(
+        config.systemPrompt ?? benchmark.defaultSystemPrompt,
+      ),
+      promptTemplate: String(
+        config.promptTemplate ?? benchmark.defaultPromptTemplate,
+      ),
+      extraBody:
+        config.extraBody && typeof config.extraBody === "object"
+          ? config.extraBody
+          : {},
       adaptiveRepetitionPenalty,
       repetitionPenalty,
-      currentRepetitionPenalty: initialRepetitionPenalty(repetitionPenalty, config.extraBody),
+      currentRepetitionPenalty: initialRepetitionPenalty(
+        repetitionPenalty,
+        config.extraBody,
+      ),
       knownLoopingPenalty: null,
       publicConfig: {
         providerId,
@@ -1130,13 +1461,23 @@ export function createRuntimeServer({
         sampleLimit,
         startIndex,
         testNumbers: String(config.testNumbers || ""),
-        systemPrompt: String(config.systemPrompt ?? benchmark.defaultSystemPrompt),
-        promptTemplate: String(config.promptTemplate ?? benchmark.defaultPromptTemplate),
-        extraBody: config.extraBody && typeof config.extraBody === "object" ? config.extraBody : {},
+        systemPrompt: String(
+          config.systemPrompt ?? benchmark.defaultSystemPrompt,
+        ),
+        promptTemplate: String(
+          config.promptTemplate ?? benchmark.defaultPromptTemplate,
+        ),
+        extraBody:
+          config.extraBody && typeof config.extraBody === "object"
+            ? config.extraBody
+            : {},
         adaptiveRepetitionPenalty,
         repetitionPenalty,
-        benchmarkMentionRegex: config.benchmarkMentionRegex == null ? undefined : String(config.benchmarkMentionRegex),
-        loopDetectionConfig: LOOP_DETECTION_CONFIG
+        benchmarkMentionRegex:
+          config.benchmarkMentionRegex == null
+            ? undefined
+            : String(config.benchmarkMentionRegex),
+        loopDetectionConfig: LOOP_DETECTION_CONFIG,
       },
       total: plannedTaskCount * passCount,
       completed: 0,
@@ -1152,7 +1493,7 @@ export function createRuntimeServer({
       cancelled: false,
       requestedStopMode: null,
       abortController: null,
-      abortControllers: new Set()
+      abortControllers: new Set(),
     };
     if (!run.model) throw new Error("Model name is required.");
     runs.set(id, run);
@@ -1163,68 +1504,122 @@ export function createRuntimeServer({
   function runCanResume(run) {
     if (run.deleted) return false;
     if (run.status === "running" || run.status === "queued") return false;
-    if (run.status === "completed" && !runHasModelErrorResults(run)) return false;
+    if (
+      run.status === "completed" &&
+      run.completed >= run.total &&
+      !runHasModelErrorResults(run)
+    )
+      return false;
     return run.completed < run.total || runHasModelErrorResults(run);
   }
 
   async function applyResumeConfig(run, config) {
     const benchmark = getBenchmark(config.benchmark ?? run.benchmark);
     const allProblems = await loadBenchmarkProblems(benchmark);
-    const { baseUrl, apiKey, providerId, providerName } = await resolveProviderConfig(config, run);
-    const adaptiveRepetitionPenalty = config.adaptiveRepetitionPenalty === undefined
-      ? run.adaptiveRepetitionPenalty
-      : Boolean(config.adaptiveRepetitionPenalty);
-    const repetitionPenalty = Number(config.repetitionPenalty ?? run.repetitionPenalty ?? 1);
-    if (adaptiveRepetitionPenalty && (!Number.isFinite(repetitionPenalty) || repetitionPenalty <= 0)) {
+    const { baseUrl, apiKey, providerId, providerName } =
+      await resolveProviderConfig(config, run);
+    const adaptiveRepetitionPenalty =
+      config.adaptiveRepetitionPenalty === undefined
+        ? run.adaptiveRepetitionPenalty
+        : Boolean(config.adaptiveRepetitionPenalty);
+    const repetitionPenalty = Number(
+      config.repetitionPenalty ?? run.repetitionPenalty ?? 1,
+    );
+    if (
+      adaptiveRepetitionPenalty &&
+      (!Number.isFinite(repetitionPenalty) || repetitionPenalty <= 0)
+    ) {
       throw new Error("Starting repetition penalty must be greater than zero.");
     }
     const parallelTasks = adaptiveRepetitionPenalty
       ? 1
       : normalizeParallelTasks(config.parallelTasks ?? run.parallelTasks);
     const passCount = normalizePassCount(config.passCount ?? run.passCount);
-    const sampleLimit = normalizeTaskCount(config.sampleLimit ?? run.sampleLimit);
+    const sampleLimit = normalizeTaskCount(
+      config.sampleLimit ?? run.sampleLimit,
+    );
     const startIndex = normalizeTaskCount(config.startIndex ?? run.startIndex);
-    const testNumbers = String(config.testNumbers ?? run.publicConfig?.testNumbers ?? "");
-    const selectedIndices = parseTestNumbers(testNumbers, allProblems.length, benchmark.taskIdPattern);
+    const testNumbers = String(
+      config.testNumbers ?? run.publicConfig?.testNumbers ?? "",
+    );
+    const selectedIndices = parseTestNumbers(
+      testNumbers,
+      allProblems.length,
+      benchmark.taskIdPattern,
+    );
     const effectiveSelectedIndices = selectedIndices.length
       ? selectedIndices
       : (() => {
-          const end = sampleLimit > 0 ? Math.min(allProblems.length, startIndex + sampleLimit) : allProblems.length;
-          return Array.from({ length: Math.max(0, end - startIndex) }, (_, offset) => startIndex + offset);
+          const end =
+            sampleLimit > 0
+              ? Math.min(allProblems.length, startIndex + sampleLimit)
+              : allProblems.length;
+          return Array.from(
+            { length: Math.max(0, end - startIndex) },
+            (_, offset) => startIndex + offset,
+          );
         })();
     const benchmarkChanged = benchmark.id !== run.benchmark;
     const selectedIndexSet = new Set(effectiveSelectedIndices);
     run.results = benchmarkChanged
       ? []
-      : run.results.filter((result) => selectedIndexSet.has(result.index) && Number(result.passNumber || 1) <= passCount);
+      : run.results.filter(
+          (result) =>
+            selectedIndexSet.has(result.index) &&
+            Number(result.passNumber || 1) <= passCount,
+        );
     run.benchmark = benchmark.id;
-    if (benchmarkChanged) run.benchmarkDataRevision = benchmark.dataRevision || null;
+    if (benchmarkChanged)
+      run.benchmarkDataRevision = benchmark.dataRevision || null;
     run.baseUrl = baseUrl;
     run.apiKey = apiKey;
     run.providerId = providerId;
     run.providerName = providerName;
+    run.usesSlotstreamApi = String(providerName || "")
+      .toLowerCase()
+      .includes("slotstream");
     run.model = String(config.model ?? run.model ?? "").trim();
     run.temperature = Number(config.temperature ?? run.temperature ?? 0);
-    run.maxOutputTokens = normalizeTokenCount(config.maxOutputTokens ?? run.maxOutputTokens, 2048);
+    run.maxOutputTokens = normalizeTokenCount(
+      config.maxOutputTokens ?? run.maxOutputTokens,
+      2048,
+    );
     run.thinkingEnabled = config.thinkingEnabled ?? run.thinkingEnabled;
-    run.thinkingBudget = normalizeTokenCount(config.thinkingBudget ?? run.thinkingBudget, 8192);
-    run.timeoutSeconds = Number(config.timeoutSeconds ?? run.timeoutSeconds ?? 15);
+    run.thinkingBudget = normalizeTokenCount(
+      config.thinkingBudget ?? run.thinkingBudget,
+      8192,
+    );
+    run.timeoutSeconds = Number(
+      config.timeoutSeconds ?? run.timeoutSeconds ?? 15,
+    );
     run.parallelTasks = parallelTasks;
     run.passCount = passCount;
     run.sampleLimit = sampleLimit;
     run.startIndex = startIndex;
     run.selectedIndices = effectiveSelectedIndices;
-    run.systemPrompt = String(config.systemPrompt ?? run.systemPrompt ?? benchmark.defaultSystemPrompt);
-    run.promptTemplate = String(config.promptTemplate ?? run.promptTemplate ?? benchmark.defaultPromptTemplate);
-    run.extraBody = config.extraBody && typeof config.extraBody === "object" ? config.extraBody : run.extraBody;
+    run.systemPrompt = String(
+      config.systemPrompt ?? run.systemPrompt ?? benchmark.defaultSystemPrompt,
+    );
+    run.promptTemplate = String(
+      config.promptTemplate ??
+        run.promptTemplate ??
+        benchmark.defaultPromptTemplate,
+    );
+    run.extraBody =
+      config.extraBody && typeof config.extraBody === "object"
+        ? config.extraBody
+        : run.extraBody;
     run.adaptiveRepetitionPenalty = adaptiveRepetitionPenalty;
     run.repetitionPenalty = repetitionPenalty;
     if (
-      Object.hasOwn(config, "adaptiveRepetitionPenalty")
-      || Object.hasOwn(config, "repetitionPenalty")
-      || Object.hasOwn(config, "extraBody")
+      Object.hasOwn(config, "adaptiveRepetitionPenalty") ||
+      Object.hasOwn(config, "repetitionPenalty") ||
+      Object.hasOwn(config, "extraBody")
     ) {
-      run.currentRepetitionPenalty = initialRepetitionPenalty(repetitionPenalty, run.extraBody);
+      run.currentRepetitionPenalty = initialRepetitionPenalty(
+        repetitionPenalty,
+        run.extraBody,
+      );
       run.knownLoopingPenalty = null;
     }
     run.total = effectiveSelectedIndices.length * passCount;
@@ -1250,10 +1645,11 @@ export function createRuntimeServer({
       extraBody: run.extraBody,
       adaptiveRepetitionPenalty,
       repetitionPenalty,
-      benchmarkMentionRegex: config.benchmarkMentionRegex == null
-        ? run.publicConfig?.benchmarkMentionRegex
-        : String(config.benchmarkMentionRegex),
-      loopDetectionConfig: LOOP_DETECTION_CONFIG
+      benchmarkMentionRegex:
+        config.benchmarkMentionRegex == null
+          ? run.publicConfig?.benchmarkMentionRegex
+          : String(config.benchmarkMentionRegex),
+      loopDetectionConfig: LOOP_DETECTION_CONFIG,
     };
     syncRunCountsFromResults(run);
     if (!run.model) throw new Error("Model name is required.");
@@ -1265,13 +1661,19 @@ export function createRuntimeServer({
   async function assertRunResumable(run) {
     const benchmark = getBenchmark(run.benchmark);
     const problems = await loadBenchmarkProblems(benchmark);
-    await assertModelCanSeeImages(run.baseUrl, run.model, benchmark, problems, run.apiKey);
+    await assertModelCanSeeImages(
+      run.baseUrl,
+      run.model,
+      benchmark,
+      problems,
+      run.apiKey,
+    );
     run.usesLmStudioSdk = await usesLmStudioSdkForThinking(
       run.baseUrl,
       run.model,
       run.thinkingEnabled,
       run.apiKey,
-      run.providerName
+      run.providerName,
     );
   }
 
@@ -1285,8 +1687,8 @@ export function createRuntimeServer({
     const runBenchmarkDataRevision = run.benchmarkDataRevision || null;
     if (runBenchmarkDataRevision !== currentBenchmarkDataRevision) {
       throw new Error(
-        `Run uses benchmark data revision "${runBenchmarkDataRevision || "unversioned"}", `
-        + `but the current revision is "${currentBenchmarkDataRevision || "unversioned"}". Start a new run instead.`
+        `Run uses benchmark data revision "${runBenchmarkDataRevision || "unversioned"}", ` +
+          `but the current revision is "${currentBenchmarkDataRevision || "unversioned"}". Start a new run instead.`,
       );
     }
     run.cancelled = false;
@@ -1303,7 +1705,9 @@ export function createRuntimeServer({
 
   async function loadPersistedRuns() {
     await fs.mkdir(runsDir, { recursive: true });
-    const entries = await fs.readdir(runsDir, { withFileTypes: true }).catch(() => []);
+    const entries = await fs
+      .readdir(runsDir, { withFileTypes: true })
+      .catch(() => []);
     for (const entry of entries) {
       // Migration backups live beneath the runs directory but are not runs.
       // Ignore all hidden directories so they are not treated as persisted runs.
@@ -1312,12 +1716,16 @@ export function createRuntimeServer({
       try {
         const raw = await fs.readFile(join(dir, "run.json"), "utf8");
         const persisted = JSON.parse(raw);
-        const resultsRaw = await fs.readFile(join(dir, "results.json"), "utf8").catch(() => "[]");
+        const resultsRaw = await fs
+          .readFile(join(dir, "results.json"), "utf8")
+          .catch(() => "[]");
         const results = JSON.parse(resultsRaw);
         const persistedRuntimeConfig = runtimeConfigFromPersistedRun(persisted);
         if (persistedRuntimeConfig.providerId) {
           try {
-            const provider = await providerStore.resolve(persistedRuntimeConfig.providerId);
+            const provider = await providerStore.resolve(
+              persistedRuntimeConfig.providerId,
+            );
             persistedRuntimeConfig.providerName = provider.name;
             persistedRuntimeConfig.baseUrl = provider.baseUrl;
             persistedRuntimeConfig.apiKey = provider.apiKey;
@@ -1325,7 +1733,8 @@ export function createRuntimeServer({
             // Keep the run visible even when its provider was removed. Resume
             // will explain that the saved provider must be recreated/selected.
             persistedRuntimeConfig.apiKey = "";
-            persistedRuntimeConfig.providerError = error instanceof Error ? error.message : String(error);
+            persistedRuntimeConfig.providerError =
+              error instanceof Error ? error.message : String(error);
           }
         }
         const run = {
@@ -1342,7 +1751,7 @@ export function createRuntimeServer({
           clients: new Set(),
           cancelled: persisted.status === "cancelled",
           abortController: null,
-          abortControllers: new Set()
+          abortControllers: new Set(),
         };
         if (!Number.isFinite(run.datasetSize)) {
           try {
@@ -1357,7 +1766,7 @@ export function createRuntimeServer({
           const penaltyState = restoreAdaptiveRepetitionPenaltyState(
             run.results,
             run.repetitionPenalty,
-            run.extraBody
+            run.extraBody,
           );
           run.currentRepetitionPenalty = penaltyState.repetitionPenalty;
           run.knownLoopingPenalty = penaltyState.knownLoopingPenalty;
@@ -1389,7 +1798,9 @@ export function createRuntimeServer({
           const provider = await providerStore.save(await readJsonBody(req));
           return sendJson(res, 201, { provider });
         } catch (error) {
-          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+          return sendJson(res, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
       const providerMatch = url.pathname.match(/^\/api\/providers\/([^/]+)$/);
@@ -1397,32 +1808,51 @@ export function createRuntimeServer({
         try {
           const provider = await providerStore.save(
             await readJsonBody(req),
-            decodeURIComponent(providerMatch[1])
+            decodeURIComponent(providerMatch[1]),
           );
           return sendJson(res, 200, { provider });
         } catch (error) {
-          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+          return sendJson(res, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
       if (providerMatch && req.method === "DELETE") {
         try {
-          const removed = await providerStore.remove(decodeURIComponent(providerMatch[1]));
-          return sendJson(res, removed ? 200 : 404, removed ? { ok: true } : { error: "Provider not found." });
+          const removed = await providerStore.remove(
+            decodeURIComponent(providerMatch[1]),
+          );
+          return sendJson(
+            res,
+            removed ? 200 : 404,
+            removed ? { ok: true } : { error: "Provider not found." },
+          );
         } catch (error) {
-          return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) });
+          return sendJson(res, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
       // Serve benchmark-owned binary assets (e.g. dataset photographs) so the
       // UI can show exactly what was sent to the model. The benchmark decides
       // which names are legal and where they live; anything it declines is a
       // 404, so no other file on disk is reachable through this route.
-      if (req.method === "GET" && url.pathname.startsWith(BENCHMARK_ASSET_ROUTE_PREFIX)) {
-        const [rawBenchmarkId, ...rest] = url.pathname.slice(BENCHMARK_ASSET_ROUTE_PREFIX.length).split("/");
+      if (
+        req.method === "GET" &&
+        url.pathname.startsWith(BENCHMARK_ASSET_ROUTE_PREFIX)
+      ) {
+        const [rawBenchmarkId, ...rest] = url.pathname
+          .slice(BENCHMARK_ASSET_ROUTE_PREFIX.length)
+          .split("/");
         const benchmarkId = decodeURIComponent(rawBenchmarkId || "");
         const file = decodeURIComponent(rest.join("/"));
-        const contentType = ASSET_CONTENT_TYPES.get(file.split(".").pop()?.toLowerCase() || "");
-        if (!contentType) return sendJson(res, 400, { error: "unsupported asset type" });
-        const assetPath = benchmarks.get(benchmarkId)?.resolveAssetPath?.(file) ?? null;
+        const contentType = ASSET_CONTENT_TYPES.get(
+          file.split(".").pop()?.toLowerCase() || "",
+        );
+        if (!contentType)
+          return sendJson(res, 400, { error: "unsupported asset type" });
+        const assetPath =
+          benchmarks.get(benchmarkId)?.resolveAssetPath?.(file) ?? null;
         if (!assetPath) return sendJson(res, 404, { error: "asset not found" });
         try {
           const bytes = await fs.readFile(assetPath);
@@ -1431,7 +1861,7 @@ export function createRuntimeServer({
             "content-length": String(bytes.length),
             "access-control-allow-origin": "*",
             // Not immutable: a re-export can rewrite the bytes behind a name.
-            "cache-control": "public, max-age=300"
+            "cache-control": "public, max-age=300",
           });
           return res.end(bytes);
         } catch {
@@ -1455,21 +1885,30 @@ export function createRuntimeServer({
           } else {
             const rawBaseUrl = url.searchParams.get("baseUrl") || "";
             if (!rawBaseUrl.trim()) {
-              return sendJson(res, 400, { error: "providerId query parameter is required" });
+              return sendJson(res, 400, {
+                error: "providerId query parameter is required",
+              });
             }
             baseUrl = normalizeBaseUrl(rawBaseUrl);
-            apiKey = (req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+            apiKey = (req.headers.authorization || "")
+              .replace(/^Bearer\s+/i, "")
+              .trim();
           }
         } catch (error) {
-          return sendJson(res, 400, { error: error instanceof Error ? error.message : "Provider is not valid." });
+          return sendJson(res, 400, {
+            error:
+              error instanceof Error ? error.message : "Provider is not valid.",
+          });
         }
         try {
           const upstream = await fetchImplementation(`${baseUrl}/models`, {
             signal: AbortSignal.timeout(3000),
-            headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+            headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
           });
           if (!upstream.ok) {
-            return sendJson(res, 502, { error: `Model endpoint replied HTTP ${upstream.status}` });
+            return sendJson(res, 502, {
+              error: `Model endpoint replied HTTP ${upstream.status}`,
+            });
           }
           const payload = await upstream.json();
           // modelType comes from oMLX's admin API ("vlm" = vision-capable);
@@ -1481,40 +1920,57 @@ export function createRuntimeServer({
                 .map((model) => ({
                   id: model.id,
                   maxModelLen: model.max_model_len ?? null,
-                  modelType: modelTypes?.get(model.id) ?? null
+                  modelType: modelTypes?.get(model.id) ?? null,
                 }))
             : [];
           return sendJson(res, 200, { models });
         } catch (error) {
           return sendJson(res, 502, {
-            error: `Could not list models: ${error instanceof Error ? error.message : String(error)}`
+            error: `Could not list models: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
       }
-      const problemsMatch = url.pathname === "/api/problems"
-        ? ["", "humaneval"]
-        : url.pathname.match(/^\/api\/benchmarks\/([^/]+)\/problems$/);
+      const problemsMatch =
+        url.pathname === "/api/problems"
+          ? ["", "humaneval"]
+          : url.pathname.match(/^\/api\/benchmarks\/([^/]+)\/problems$/);
       if (req.method === "GET" && problemsMatch) {
         const benchmark = getBenchmark(problemsMatch[1]);
         const problems = await loadBenchmarkProblems(benchmark);
         return sendJson(res, 200, {
           benchmark: benchmark.id,
           total: problems.length,
-          problems: problems.map((problem) => benchmark.problemSummary(problem))
+          problems: problems.map((problem) =>
+            benchmark.problemSummary(problem),
+          ),
         });
       }
       if (req.method === "GET" && url.pathname === "/api/runs") {
         const summaries = [...runs.values()]
           .map((run) => runSummary(run, { includeResults: false }))
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return sendJson(res, 200, { runs: summaries }, { endpoint: "list-runs", runCount: summaries.length });
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          );
+        return sendJson(
+          res,
+          200,
+          { runs: summaries },
+          { endpoint: "list-runs", runCount: summaries.length },
+        );
       }
       if (req.method === "POST" && url.pathname === "/api/runs") {
         const body = await readJsonBody(req);
         const run = await createRun(body);
-        return sendJson(res, 201, runSummary(run), { endpoint: "create-run", runId: run.id, resultCount: run.results.length });
+        return sendJson(res, 201, runSummary(run), {
+          endpoint: "create-run",
+          runId: run.id,
+          resultCount: run.results.length,
+        });
       }
-      const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/(events|cancel|stop|resume))?$/);
+      const runMatch = url.pathname.match(
+        /^\/api\/runs\/([^/]+)(?:\/(events|cancel|stop|resume))?$/,
+      );
       if (runMatch) {
         const run = runs.get(runMatch[1]);
         if (!run) return sendJson(res, 404, { error: "Run not found" });
@@ -1522,7 +1978,8 @@ export function createRuntimeServer({
           run.deleted = true;
           run.cancelled = true;
           dequeueRun(run);
-          for (const controller of run.abortControllers || []) controller.abort();
+          for (const controller of run.abortControllers || [])
+            controller.abort();
           run.abortController?.abort();
           for (const client of run.clients) client.end();
           run.clients.clear();
@@ -1533,12 +1990,17 @@ export function createRuntimeServer({
           return sendJson(res, 200, { ok: true });
         }
         if (req.method === "GET" && !runMatch[2]) {
-          return sendJson(res, 200, { ...runSummary(run), events: run.events }, {
-            endpoint: "get-run",
-            runId: run.id,
-            resultCount: run.results.length,
-            eventCount: run.events.length
-          });
+          return sendJson(
+            res,
+            200,
+            { ...runSummary(run), events: run.events },
+            {
+              endpoint: "get-run",
+              runId: run.id,
+              resultCount: run.results.length,
+              eventCount: run.events.length,
+            },
+          );
         }
         if (req.method === "POST" && runMatch[2] === "stop") {
           const requestedStopMode = url.searchParams.get("mode");
@@ -1546,22 +2008,26 @@ export function createRuntimeServer({
             return sendJson(res, 400, { error: "Unknown stop mode." });
           }
           if (run.status !== "running") {
-            return sendJson(res, 409, { error: "Only a running run can stop gracefully." });
+            return sendJson(res, 409, {
+              error: "Only a running run can stop gracefully.",
+            });
           }
           run.requestedStopMode = requestedStopMode;
           appendEvent(run, "stop-requested", {
             mode: requestedStopMode,
-            summary: runSummary(run, { includeResults: false })
+            summary: runSummary(run, { includeResults: false }),
           });
           return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
         if (req.method === "DELETE" && runMatch[2] === "stop") {
           if (run.status !== "running" || !run.requestedStopMode) {
-            return sendJson(res, 409, { error: "Run has no pending stop request." });
+            return sendJson(res, 409, {
+              error: "Run has no pending stop request.",
+            });
           }
           run.requestedStopMode = null;
           appendEvent(run, "stop-cancelled", {
-            summary: runSummary(run, { includeResults: false })
+            summary: runSummary(run, { includeResults: false }),
           });
           return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
@@ -1573,9 +2039,13 @@ export function createRuntimeServer({
             dequeueRun(run);
             run.status = "cancelled";
             run.finishedAt = new Date().toISOString();
-            appendEvent(run, "error", { message: "Run cancelled.", summary: runSummary(run, { includeResults: false }) });
+            appendEvent(run, "error", {
+              message: "Run cancelled.",
+              summary: runSummary(run, { includeResults: false }),
+            });
           }
-          for (const controller of run.abortControllers || []) controller.abort();
+          for (const controller of run.abortControllers || [])
+            controller.abort();
           run.abortController?.abort();
           return sendJson(res, 200, runSummary(run, { includeResults: false }));
         }
@@ -1584,14 +2054,18 @@ export function createRuntimeServer({
           await applyResumeConfig(run, body);
           await assertRunResumable(run);
           const resumedRun = resumeRun(run);
-          return sendJson(res, 200, runSummary(resumedRun, { includeResults: false }));
+          return sendJson(
+            res,
+            200,
+            runSummary(resumedRun, { includeResults: false }),
+          );
         }
         if (req.method === "GET" && runMatch[2] === "events") {
           res.writeHead(200, {
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
             connection: "keep-alive",
-            "access-control-allow-origin": "*"
+            "access-control-allow-origin": "*",
           });
           for (const event of run.events) {
             res.write(`id: ${event.id}\n`);
@@ -1606,22 +2080,40 @@ export function createRuntimeServer({
       sendJson(res, 404, { error: "Not found" });
     } catch (error) {
       if (!res.headersSent) {
-        sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        sendJson(res, 500, {
+          error: error instanceof Error ? error.message : String(error),
+        });
       } else {
-        console.error("Request failed after response headers were sent:", error);
+        console.error(
+          "Request failed after response headers were sent:",
+          error,
+        );
         res.end();
       }
     }
   });
 
-  return { server, runs, port, runsDir, cacheDir, configDir, providerStore, loadPersistedRuns };
+  return {
+    server,
+    runs,
+    port,
+    runsDir,
+    cacheDir,
+    configDir,
+    providerStore,
+    loadPersistedRuns,
+  };
 }
 
 export async function startRuntimeServer(options = {}) {
   const app = createRuntimeServer(options);
   await app.loadPersistedRuns();
-  await new Promise((resolve) => app.server.listen(app.port, "0.0.0.0", resolve));
-  console.log(`Eval benchmark server listening on http://localhost:${app.port}`);
+  await new Promise((resolve) =>
+    app.server.listen(app.port, "0.0.0.0", resolve),
+  );
+  console.log(
+    `Eval benchmark server listening on http://localhost:${app.port}`,
+  );
   console.log(`Benchmark artifacts are written to ${app.runsDir}`);
   return app;
 }
