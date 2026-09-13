@@ -1044,16 +1044,17 @@ describe("runtime server", () => {
       testNumbers: "0",
       maxOutputTokens: 700,
       thinkingEnabled: false,
-      thinkingBudget: 300
+      thinkingBudget: 300,
+      extraBody: { thinking_budget: 900 }
     });
     await waitForStatus(apiUrl, withoutThinking.id, ["completed"]);
 
     expect(model.requests[1].body).toMatchObject({
       max_tokens: 700,
       enable_thinking: false,
-      thinking_budget: 0,
       chat_template_kwargs: { enable_thinking: false }
     });
+    expect(model.requests[1].body).not.toHaveProperty("thinking_budget");
   });
 
   it("uses the LM Studio SDK reasoning budget for GGUF models", async () => {

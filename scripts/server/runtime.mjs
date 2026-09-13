@@ -549,11 +549,12 @@ export function createRuntimeServer({
       temperature: run.temperature,
       max_tokens: thinkingBudget + run.maxOutputTokens,
       enable_thinking: run.thinkingEnabled,
-      thinking_budget: thinkingBudget,
       chat_template_kwargs: { enable_thinking: run.thinkingEnabled },
       stream_options: { include_usage: true }
     };
     if (run.extraBody && Object.keys(run.extraBody).length) Object.assign(body, run.extraBody);
+    if (run.thinkingEnabled) body.thinking_budget = thinkingBudget;
+    else delete body.thinking_budget;
     if (!Number.isFinite(Number(body.repetition_penalty)) || Number(body.repetition_penalty) <= 0) {
       delete body.repetition_penalty;
     }
