@@ -32,6 +32,7 @@ import {
 import { createLmStudioChatCompletionResponse } from "./lmStudioModel.mjs";
 import {
   fetchModelResponseWithRetry,
+  throwIfModelResponseError,
   throwIfRetryableModelOutput,
 } from "./modelRetry.mjs";
 import { createProviderStore } from "./providerStore.mjs";
@@ -553,6 +554,15 @@ export function createRuntimeServer({
             text: payload,
           });
           continue;
+        }
+        if (parsed.error) {
+          appendEvent(run, "model-stream-error", {
+            taskId: problem.task_id,
+            index,
+            ...context,
+            error: parsed.error,
+          });
+          throwIfModelResponseError(parsed.error);
         }
         const detectedLoop = consumeCompletionPayload(parsed);
         if (detectedLoop && run.adaptiveRepetitionPenalty) return true;

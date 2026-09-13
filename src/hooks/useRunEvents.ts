@@ -95,7 +95,7 @@ export function useRunEvents({
       // refetch so every queued run's badge position renumbers.
       if (event.type === "run-started") loadRuns().catch(() => undefined);
     };
-    for (const name of ["run-started", "task-started", "prompt", "token", "raw-delta", "code-extracted", "task-finished", "done", "error"]) {
+    for (const name of ["run-started", "task-started", "prompt", "token", "raw-delta", "model-stream-error", "model-retry", "task-invalidated", "code-extracted", "task-finished", "done", "error"]) {
       source.addEventListener(name, handle);
     }
     source.onerror = () => {

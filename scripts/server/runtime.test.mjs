@@ -908,6 +908,50 @@ describe("runtime server", () => {
     expect(completed.results).toHaveLength(1);
   });
 
+  it("logs and retries streamed insufficient-memory errors", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "partial" } }] })}\n\n`,
+        );
+        response.write(
+          `data: ${JSON.stringify({ error: { message: "memory pressure interrupted inference boundary", code: "insufficient_memory", type: "insufficient_memory" } })}\n\n`,
+        );
+        response.end();
+      },
+      goodModelHandler,
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      testNumbers: "0",
+    });
+    const completed = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(model.requests).toHaveLength(2);
+    expect(completed).toMatchObject({ completed: 1, passed: 1, failed: 0 });
+    expect(completed.events).toContainEqual(
+      expect.objectContaining({
+        type: "model-stream-error",
+        data: expect.objectContaining({
+          taskId: "HumanEval/0",
+          error: expect.objectContaining({ code: "insufficient_memory" }),
+        }),
+      }),
+    );
+    expect(completed.events).toContainEqual(
+      expect.objectContaining({
+        type: "model-retry",
+        data: expect.objectContaining({
+          taskId: "HumanEval/0",
+          error: expect.stringContaining("insufficient_memory"),
+        }),
+      }),
+    );
+  });
+
   it("cancels a running run, then resumes it to completion", async () => {
     const rootDir = await makeRootDir();
     let hangingResponses = [];

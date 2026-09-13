@@ -23,6 +23,19 @@ export function throwIfRetryableModelOutput(...outputs) {
   throw new RetryableModelResponseError(`Model request failed: ${errorOutput}`);
 }
 
+export function throwIfModelResponseError(errorPayload) {
+  if (!errorPayload) return;
+
+  const errorDetails = typeof errorPayload === "object" ? errorPayload : {};
+  const errorCode = String(errorDetails.code ?? errorDetails.type ?? "server_error");
+  const errorMessage = String(errorDetails.message ?? errorPayload);
+  const message = `Model request failed: ${errorCode}: ${errorMessage}`;
+  if (errorCode === "insufficient_memory" || errorDetails.type === "insufficient_memory") {
+    throw new RetryableModelResponseError(message);
+  }
+  throw new Error(message);
+}
+
 async function createRetryableModelResponseError(response) {
   const responseText = await response.text().catch(() => "");
   return new RetryableModelResponseError(`Model request failed: HTTP ${response.status} ${responseText.slice(0, 1000)}`);
