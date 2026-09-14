@@ -40,11 +40,31 @@ describe("ModelCombobox", () => {
     const input = screen.getByRole("combobox");
     await userEvent.type(input, "qwen 9b");
     expect(screen.getAllByRole("option")).toHaveLength(1);
-    fireEvent.pointerDown(screen.getByText("Qwen3.5-9B-OptiQ-4bit"));
+    await userEvent.click(screen.getByText("Qwen3.5-9B-OptiQ-4bit"));
     expect(input).toHaveValue("Qwen3.5-9B-OptiQ-4bit");
     // A selected value shows the whole list again so switching stays easy.
     await userEvent.click(input);
     expect(screen.getAllByRole("option")).toHaveLength(MODELS.length);
+  });
+
+  it("keeps the list open when a touch starts so the options can scroll", async () => {
+    render(<Harness />);
+    const input = screen.getByRole("combobox");
+    await userEvent.click(input);
+
+    fireEvent.pointerDown(screen.getByText(MODELS[1]), { pointerType: "touch" });
+
+    expect(input).toHaveValue("");
+    expect(screen.getAllByRole("option")).toHaveLength(MODELS.length);
+  });
+
+  it("closes when another element is activated", async () => {
+    render(<><Harness /><button type="button">Outside</button></>);
+    const input = screen.getByRole("combobox");
+    const outsideButton = screen.getByRole("button", { name: "Outside" });
+    await userEvent.click(input);
+    await userEvent.click(outsideButton);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("selects with arrow keys and enter", async () => {

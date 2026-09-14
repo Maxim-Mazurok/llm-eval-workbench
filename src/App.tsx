@@ -82,6 +82,7 @@ export default function App() {
     toggleNotificationsForRun,
     selectRun,
     selectComparison,
+    selectComparisonRoute,
     selectNewBench,
     startRun,
     cancelRun,
@@ -105,7 +106,12 @@ export default function App() {
   if (route.view === "comparison") {
     return (
       <main className="comparison-shell">
-        <BenchmarkComparison runs={runs} onBack={selectNewBench} />
+        <BenchmarkComparison
+          runs={runs}
+          route={route}
+          onBack={selectNewBench}
+          onRouteChange={selectComparisonRoute}
+        />
       </main>
     );
   }
@@ -180,6 +186,7 @@ export default function App() {
       <section className="bench-main">
         <RunStrip
           runs={runs}
+          route={route}
           selectedRunId={selectedRunId}
           onSelectNew={selectNewBench}
           onSelectComparison={selectComparison}

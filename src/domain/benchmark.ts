@@ -283,6 +283,7 @@ export type BenchRun = {
   status: string;
   benchmark?: string;
   benchmarkDataRevision?: string | null;
+  benchmarkDataOutdated?: boolean;
   datasetSize?: number | null;
   model: string;
   providerId?: string | null;
@@ -476,28 +477,72 @@ export type PassVariabilityStats = {
   };
 };
 
-export type BenchRoute = {
+type BenchRouteSelection = {
+  selectedBenchmarkIds?: string[];
+  selectedModels?: string[];
+};
+
+export type BenchRoute = ({
   view: "new";
 } | {
   view: "run";
   id: string;
 } | {
   view: "comparison";
-};
+  onlyBestModelResult?: boolean;
+  ignoreIncompletePasses?: boolean;
+  ignoreOutdatedResults?: boolean;
+  comparisonView?: "chart" | "table";
+}) & BenchRouteSelection;
 
-export function parseBenchRoute(pathname: string): BenchRoute {
-  if (/^\/comparison\/?$/.test(pathname)) return { view: "comparison" };
+function routeSelection(search: string): BenchRouteSelection {
+  const searchParameters = new URLSearchParams(search);
+  const selection: BenchRouteSelection = {};
+  if (searchParameters.has("benchmark")) selection.selectedBenchmarkIds = searchParameters.getAll("benchmark").filter(Boolean);
+  if (searchParameters.has("model")) selection.selectedModels = searchParameters.getAll("model").filter(Boolean);
+  return selection;
+}
+
+export function parseBenchRoute(pathname: string, search = ""): BenchRoute {
+  const selection = routeSelection(search);
+  if (/^\/comparison\/?$/.test(pathname)) {
+    const searchParameters = new URLSearchParams(search);
+    const route: BenchRoute = { view: "comparison", ...selection };
+    if (searchParameters.get("best") === "false") route.onlyBestModelResult = false;
+    if (searchParameters.get("complete") === "false") route.ignoreIncompletePasses = false;
+    if (searchParameters.get("outdated") === "false") route.ignoreOutdatedResults = false;
+    if (searchParameters.get("view") === "table") route.comparisonView = "table";
+    return route;
+  }
   const runMatch = pathname.match(/^\/run\/([^/]+)\/?$/);
-  if (runMatch) return { view: "run", id: decodeURIComponent(runMatch[1]) };
-  return { view: "new" };
+  if (runMatch) return { view: "run", id: decodeURIComponent(runMatch[1]), ...selection };
+  return { view: "new", ...selection };
 }
 
 export function readBenchRoute(): BenchRoute {
   if (typeof window === "undefined") return { view: "new" };
-  return parseBenchRoute(window.location.pathname);
+  return parseBenchRoute(window.location.pathname, window.location.search);
 }
 
 export function routePath(route: BenchRoute) {
-  if (route.view === "run") return `/run/${encodeURIComponent(route.id)}`;
-  return route.view === "comparison" ? "/comparison" : "/new";
+  const pathname = route.view === "run"
+    ? `/run/${encodeURIComponent(route.id)}`
+    : route.view === "comparison" ? "/comparison" : "/new";
+  const searchParameters = new URLSearchParams();
+  if (route.selectedBenchmarkIds) {
+    if (!route.selectedBenchmarkIds.length) searchParameters.set("benchmark", "");
+    else route.selectedBenchmarkIds.forEach((benchmarkId) => searchParameters.append("benchmark", benchmarkId));
+  }
+  if (route.selectedModels) {
+    if (!route.selectedModels.length) searchParameters.set("model", "");
+    else route.selectedModels.forEach((model) => searchParameters.append("model", model));
+  }
+  if (route.view === "comparison") {
+    if (route.onlyBestModelResult === false) searchParameters.set("best", "false");
+    if (route.ignoreIncompletePasses === false) searchParameters.set("complete", "false");
+    if (route.ignoreOutdatedResults === false) searchParameters.set("outdated", "false");
+    if (route.comparisonView === "table") searchParameters.set("view", "table");
+  }
+  const search = searchParameters.toString();
+  return search ? `${pathname}?${search}` : pathname;
 }

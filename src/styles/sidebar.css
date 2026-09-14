@@ -319,6 +319,8 @@
   margin: 0;
   padding: 4px;
   overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   list-style: none;
   background: #ffffff;
   border: 1px solid var(--line);

@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BenchRun } from "../domain/benchmark";
+import type { BenchRoute, BenchRun } from "../domain/benchmark";
 import { RunStrip } from "./RunStrip";
 
 // A graded pack benchmark, mocked so this test doesn't depend on any real
@@ -44,35 +45,40 @@ function benchmarkRun(id: string, benchmark: string, model: string): BenchRun {
   };
 }
 
+function FilterHarness({ runs }: { runs: BenchRun[] }) {
+  const [route, setRoute] = useState<BenchRoute>({ view: "new" });
+  return (
+    <RunStrip
+      route={route}
+      runs={runs}
+      selectedRunId={null}
+      onDelete={vi.fn()}
+      onNavigate={setRoute}
+      onRemoveFromQueue={vi.fn()}
+      onSelectComparison={vi.fn()}
+      onSelectNew={vi.fn()}
+    />
+  );
+}
+
 describe("RunStrip", () => {
-  it("filters runs by benchmark name and model", async () => {
+  it("filters runs by multiple benchmark and model selections", async () => {
     const runs = [
       benchmarkRun("human-qwen", "humaneval", "Qwen Coder"),
       benchmarkRun("mini-qwen", "bbeh-mini", "Qwen Reasoning"),
       benchmarkRun("mini-gemma", "bbeh-mini", "Gemma Reasoning")
     ];
-    render(
-      <RunStrip
-        runs={runs}
-        selectedRunId={null}
-        onDelete={vi.fn()}
-        onNavigate={vi.fn()}
-        onRemoveFromQueue={vi.fn()}
-        onSelectNew={vi.fn()}
-      />
-    );
+    render(<FilterHarness runs={runs} />);
 
-    const benchmarkFilter = screen.getByRole("combobox", { name: "Filter by benchmark name" });
-    await userEvent.click(benchmarkFilter);
-    await userEvent.clear(benchmarkFilter);
-    await userEvent.type(benchmarkFilter, "mini");
-    await userEvent.click(screen.getByRole("option", { name: "BBEH Mini (corrected)" }));
-    expect(screen.queryByText("Qwen Coder")).not.toBeInTheDocument();
-    expect(screen.getByText("Qwen Reasoning")).toBeInTheDocument();
-    expect(screen.getByText("Gemma Reasoning")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Benchmarks/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "HumanEval (code)" }));
+    expect(screen.queryByRole("button", { name: /^Qwen CoderHumanEval/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Qwen ReasoningBBEH Mini/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Gemma ReasoningBBEH Mini/ })).toBeInTheDocument();
 
-    await userEvent.type(screen.getByRole("combobox", { name: "Filter by model" }), "gemma");
-    expect(screen.queryByText("Qwen Reasoning")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Models/ }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Qwen Reasoning" }));
+    expect(screen.queryByRole("button", { name: /^Qwen ReasoningBBEH Mini/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Gemma ReasoningBBEH Mini/ })).toBeInTheDocument();
   });
 
@@ -86,6 +92,7 @@ describe("RunStrip", () => {
       liveScore: 1
     };
     const properties = {
+      route: { view: "run" as const, id: liveRun.id },
       selectedRunId: liveRun.id,
       onDelete: vi.fn(),
       onNavigate: vi.fn(),
@@ -124,6 +131,7 @@ describe("RunStrip", () => {
     render(
       <RunStrip
         runs={[gradedRun]}
+        route={{ view: "run", id: gradedRun.id }}
         selectedRunId={gradedRun.id}
         onDelete={vi.fn()}
         onNavigate={vi.fn()}

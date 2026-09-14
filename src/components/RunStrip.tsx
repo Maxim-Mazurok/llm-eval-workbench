@@ -1,11 +1,11 @@
 import { ArrowUpRight, Check, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
-import { benchmarkOption, runBenchmarkId, runBenchmarkScoring, type BenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
+import { benchmarkOption, runBenchmarkId, runBenchmarkScoring, type BenchRoute, type BenchRun } from "../domain/benchmark";
 import { formatTime, pct, progressSegments, runMeanScore, runQueueBadgePosition, runTotal, statusIsLive } from "../domain/runs";
-import { BenchmarkCombobox, ModelCombobox } from "./ModelCombobox";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 
 export function RunStrip({
   runs,
+  route,
   selectedRunId,
   onSelectNew,
   onSelectComparison,
@@ -14,6 +14,7 @@ export function RunStrip({
   onRemoveFromQueue
 }: {
   runs: BenchRun[];
+  route: BenchRoute;
   selectedRunId: string | null;
   onSelectNew: () => void;
   onSelectComparison: () => void;
@@ -21,13 +22,16 @@ export function RunStrip({
   onDelete: (run: BenchRun) => void;
   onRemoveFromQueue: (run: BenchRun) => void;
 }) {
-  const [benchmarkFilter, setBenchmarkFilter] = useState<BenchmarkId | "">("");
-  const [modelFilter, setModelFilter] = useState("");
-  const normalizedModelFilter = modelFilter.trim().toLocaleLowerCase();
+  const availableBenchmarkIds = Array.from(new Set(runs.map(runBenchmarkId))).sort((left, right) => (
+    benchmarkOption(left).label.localeCompare(benchmarkOption(right).label)
+  ));
   const availableModels = Array.from(new Set(runs.map((run) => run.model).filter(Boolean))).sort();
+  const selectedBenchmarkIds = route.selectedBenchmarkIds ?? availableBenchmarkIds;
+  const selectedModels = route.selectedModels ?? availableModels;
+  const hiddenBenchmarkIds = new Set(availableBenchmarkIds.filter((benchmarkId) => !selectedBenchmarkIds.includes(benchmarkId)));
+  const hiddenModels = new Set(availableModels.filter((model) => !selectedModels.includes(model)));
   const filteredRuns = runs.filter((run) => {
-    return (!benchmarkFilter || runBenchmarkId(run) === benchmarkFilter)
-      && (run.model ?? "").toLocaleLowerCase().includes(normalizedModelFilter);
+    return !hiddenBenchmarkIds.has(runBenchmarkId(run)) && !hiddenModels.has(run.model);
   });
 
   return (
@@ -40,23 +44,24 @@ export function RunStrip({
         </button>
       </div>
       <div className="run-filters">
-        <label>
-          <BenchmarkCombobox
-            ariaLabel="Filter by benchmark name"
-            placeholder="All benchmarks"
-            value={benchmarkFilter}
-            onChange={setBenchmarkFilter}
-          />
-        </label>
-        <label>
-          <ModelCombobox
-            ariaLabel="Filter by model"
-            models={availableModels}
-            placeholder="Model"
-            value={modelFilter}
-            onChange={setModelFilter}
-          />
-        </label>
+        <MultiSelectFilter
+          hiddenValues={hiddenBenchmarkIds}
+          label="Benchmarks"
+          options={availableBenchmarkIds.map((benchmarkId) => ({ value: benchmarkId, label: benchmarkOption(benchmarkId).label }))}
+          setHiddenValues={(hiddenValues) => onNavigate({
+            ...route,
+            selectedBenchmarkIds: availableBenchmarkIds.filter((benchmarkId) => !hiddenValues.has(benchmarkId))
+          })}
+        />
+        <MultiSelectFilter
+          hiddenValues={hiddenModels}
+          label="Models"
+          options={availableModels.map((model) => ({ value: model, label: model }))}
+          setHiddenValues={(hiddenValues) => onNavigate({
+            ...route,
+            selectedModels: availableModels.filter((model) => !hiddenValues.has(model))
+          })}
+        />
       </div>
       <div className="run-list">
         <div className={selectedRunId === null ? "run-tab new-run-tab active" : "run-tab new-run-tab"}>

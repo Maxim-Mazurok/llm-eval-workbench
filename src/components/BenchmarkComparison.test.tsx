@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BenchRun } from "../domain/benchmark";
+import type { BenchRoute, BenchRun } from "../domain/benchmark";
 import { BenchmarkComparison, buildComparisonRows } from "./BenchmarkComparison";
 
 class TestResizeObserver {
@@ -50,6 +51,11 @@ function comparisonRun(overrides: Partial<BenchRun>): BenchRun {
   };
 }
 
+function ComparisonHarness({ runs }: { runs: BenchRun[] }) {
+  const [route, setRoute] = useState<Extract<BenchRoute, { view: "comparison" }>>({ view: "comparison" });
+  return <BenchmarkComparison runs={runs} route={route} onBack={() => undefined} onRouteChange={setRoute} />;
+}
+
 describe("benchmark comparison rows", () => {
   it("collapses configurations to the best result for each model and benchmark", () => {
     const rows = buildComparisonRows([
@@ -88,9 +94,16 @@ describe("benchmark comparison rows", () => {
     expect(rows[0].cells.get("humaneval")?.run.id).toBe("complete");
   });
 
+  it("excludes outdated results unless the filter is disabled", () => {
+    const runs = [comparisonRun({ id: "outdated", benchmarkDataOutdated: true })];
+
+    expect(buildComparisonRows(runs, ["humaneval"], false, true)).toHaveLength(0);
+    expect(buildComparisonRows(runs, ["humaneval"], false, true, false)).toHaveLength(1);
+  });
+
   it("shows configurable chart axes and switches back to the comparison table", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
-    render(<BenchmarkComparison runs={[comparisonRun({})]} onBack={() => undefined} />);
+    render(<ComparisonHarness runs={[comparisonRun({})]} />);
 
     expect(screen.getByRole("img", { name: /pareto chart/i })).toBeInTheDocument();
     const xAxis = screen.getByLabelText("X axis");
@@ -104,5 +117,47 @@ describe("benchmark comparison rows", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Table" }));
     expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("reports filter, checkbox, and view changes through comparison route state", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    const onRouteChange = vi.fn();
+    render(
+      <BenchmarkComparison
+        runs={[comparisonRun({}), comparisonRun({ id: "run-2", model: "model-two", benchmark: "bbeh" })]}
+        route={{ view: "comparison" }}
+        onBack={() => undefined}
+        onRouteChange={onRouteChange}
+      />
+    );
+
+    await userEvent.click(screen.getByText("Models"));
+    await userEvent.click(screen.getByRole("checkbox", { name: "model-two" }));
+    expect(onRouteChange).toHaveBeenLastCalledWith({ view: "comparison", selectedModels: ["model-one"] });
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Only best model result" }));
+    expect(onRouteChange).toHaveBeenLastCalledWith({ view: "comparison", onlyBestModelResult: false });
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Ignore outdated results" }));
+    expect(onRouteChange).toHaveBeenLastCalledWith({ view: "comparison", ignoreOutdatedResults: false });
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    expect(onRouteChange).toHaveBeenLastCalledWith({ view: "comparison", comparisonView: "table" });
+  });
+
+  it("closes filters when another filter or control is activated", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    render(<ComparisonHarness runs={[comparisonRun({}), comparisonRun({ id: "run-2", model: "model-two", benchmark: "bbeh" })]} />);
+    const benchmarksTrigger = screen.getByRole("button", { name: /Benchmarks/ });
+    const modelsTrigger = screen.getByRole("button", { name: /Models/ });
+
+    await userEvent.click(benchmarksTrigger);
+    expect(benchmarksTrigger).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(modelsTrigger);
+    expect(benchmarksTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(modelsTrigger).toHaveAttribute("aria-expanded", "true");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Only best model result" }));
+    expect(modelsTrigger).toHaveAttribute("aria-expanded", "false");
   });
 });

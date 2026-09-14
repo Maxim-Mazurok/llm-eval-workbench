@@ -271,7 +271,12 @@ export function useBenchmarkController() {
   });
 
   function navigateTo(routeTarget: BenchRoute, replace = false) {
-    const path = routePath(routeTarget);
+    const nextRoute: BenchRoute = {
+      ...routeTarget,
+      selectedBenchmarkIds: routeTarget.selectedBenchmarkIds ?? route.selectedBenchmarkIds,
+      selectedModels: routeTarget.selectedModels ?? route.selectedModels
+    };
+    const path = routePath(nextRoute);
     if (window.location.pathname !== path) {
       if (replace) {
         window.history.replaceState(null, "", path);
@@ -279,7 +284,7 @@ export function useBenchmarkController() {
         window.history.pushState(null, "", path);
       }
     }
-    setRoute(routeTarget);
+    setRoute(nextRoute);
   }
 
   async function loadRuns(selectLatest = false) {
@@ -320,6 +325,11 @@ export function useBenchmarkController() {
   function selectComparison() {
     setError(null);
     navigateTo({ view: "comparison" });
+  }
+
+  function selectComparisonRoute(comparisonRoute: Extract<BenchRoute, { view: "comparison" }>) {
+    setError(null);
+    navigateTo(comparisonRoute);
   }
 
   useEffect(() => {
@@ -604,6 +614,7 @@ export function useBenchmarkController() {
     toggleNotificationsForRun,
     selectRun,
     selectComparison,
+    selectComparisonRoute,
     selectNewBench,
     startRun,
     cancelRun,

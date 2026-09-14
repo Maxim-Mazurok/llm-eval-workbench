@@ -113,6 +113,47 @@ describe("benchmark routes", () => {
   it("round-trips the comparison page", () => {
     expect(parseBenchRoute("/comparison")).toEqual({ view: "comparison" });
     expect(routePath({ view: "comparison" })).toBe("/comparison");
+
+    const comparisonRoute = {
+      view: "comparison" as const,
+      selectedBenchmarkIds: ["humaneval", "pack/example"],
+      selectedModels: ["model one", "org/model-two"],
+      onlyBestModelResult: false,
+      ignoreIncompletePasses: false,
+      ignoreOutdatedResults: false,
+      comparisonView: "table" as const
+    };
+    const comparisonPath = routePath(comparisonRoute);
+    const comparisonUrl = new URL(comparisonPath, "http://localhost");
+    expect(parseBenchRoute(comparisonUrl.pathname, comparisonUrl.search)).toEqual(comparisonRoute);
+  });
+
+  it("round-trips empty comparison selections", () => {
+    const comparisonPath = routePath({
+      view: "comparison",
+      selectedBenchmarkIds: [],
+      selectedModels: []
+    });
+    const comparisonUrl = new URL(comparisonPath, "http://localhost");
+    expect(parseBenchRoute(comparisonUrl.pathname, comparisonUrl.search)).toEqual({
+      view: "comparison",
+      selectedBenchmarkIds: [],
+      selectedModels: []
+    });
+  });
+
+  it.each([
+    { view: "new" as const },
+    { view: "run" as const, id: "run/one" }
+  ])("round-trips shared selections on the $view page", (route) => {
+    const routeWithSelections = {
+      ...route,
+      selectedBenchmarkIds: ["humaneval", "bbeh-mini"],
+      selectedModels: ["model one", "org/model-two"]
+    };
+    const routeUrl = new URL(routePath(routeWithSelections), "http://localhost");
+
+    expect(parseBenchRoute(routeUrl.pathname, routeUrl.search)).toEqual(routeWithSelections);
   });
 });
 

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeRunArtifacts } from "./artifacts.mjs";
 import {
+  benchmarkDataIsOutdated,
   buildPromptMessages,
   compactResult,
   discardResumeArtifacts,
@@ -192,20 +193,48 @@ describe("server domain helpers", () => {
     });
   });
 
-  it("does not count a configured subset as a complete benchmark pass", () => {
+  it("counts all historically planned tasks as a complete pass when test numbers were not configured", () => {
+    const run = runFixture({
+      total: 3,
+      datasetSize: 164,
+      selectedIndices: [0, 1, 2],
+      results: [
+        { taskId: "one", passNumber: 1, passed: true, tests: [] },
+        { taskId: "two", passNumber: 1, passed: false, score: 0.5, tests: [] },
+        { taskId: "three", passNumber: 1, passed: true, tests: [] }
+      ],
+      publicConfig: { testNumbers: "" }
+    });
+
+    expect(runSummary(run, { includeResults: false }).comparison).toMatchObject({
+      completePassCount: 1,
+      completePassMeanScore: 2.5 / 3,
+      completePassSignalTotal: 3
+    });
+  });
+
+  it("does not count explicitly configured test numbers as a complete benchmark pass", () => {
     const run = runFixture({
       total: 1,
       datasetSize: 164,
-      selectedIndices: [10]
+      selectedIndices: [10],
+      publicConfig: { testNumbers: "10" }
     });
 
     expect(runSummary(run, { includeResults: false }).comparison).toMatchObject({
       completePassCount: 0,
       completePassMeanScore: null,
-      activeDurationMilliseconds: 110,
       completePassSignalTotal: 0,
       completePassActiveDurationMilliseconds: 0
     });
+  });
+
+  it("detects outdated benchmark revisions and dataset sizes", () => {
+    const run = runFixture({ benchmarkDataRevision: "revision-one", datasetSize: 35 });
+
+    expect(benchmarkDataIsOutdated(run, "revision-one", 35)).toBe(false);
+    expect(benchmarkDataIsOutdated(run, "revision-two", 35)).toBe(true);
+    expect(benchmarkDataIsOutdated(run, "revision-one", 40)).toBe(true);
   });
 
   it("redacts api keys for every endpoint", () => {

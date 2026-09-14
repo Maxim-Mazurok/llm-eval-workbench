@@ -67,11 +67,11 @@
   border-radius: 6px;
 }
 
-.comparison-filter {
+.multi-select-filter {
   position: relative;
 }
 
-.comparison-filter summary {
+.multi-select-filter-trigger {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -87,21 +87,17 @@
   font-weight: 700;
 }
 
-.comparison-filter summary::-webkit-details-marker {
-  display: none;
-}
-
-.comparison-filter summary span {
+.multi-select-filter-trigger span {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
 }
 
-.comparison-filter[open] summary svg {
+.multi-select-filter-trigger[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
 
-.comparison-filter-menu {
+.multi-select-filter-menu {
   position: absolute;
   top: calc(100% + 5px);
   left: 0;
@@ -113,7 +109,7 @@
   box-shadow: 0 12px 28px rgba(33, 35, 31, 0.14);
 }
 
-.comparison-filter-search {
+.multi-select-filter-search {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -122,7 +118,7 @@
   border-radius: 4px;
 }
 
-.comparison-filter-search input {
+.multi-select-filter-search input {
   width: 100%;
   height: 32px;
   padding: 0;
@@ -130,12 +126,14 @@
   outline: 0;
 }
 
-.comparison-filter-options {
+.multi-select-filter-options {
   max-height: 240px;
   overflow-y: auto;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
-.comparison-filter-option,
+.multi-select-filter-option,
 .comparison-check {
   display: flex;
   gap: 8px;
@@ -144,18 +142,18 @@
   font-size: 13px;
 }
 
-.comparison-filter-option {
+.multi-select-filter-option {
   padding: 4px 6px;
 }
 
-.comparison-filter-all {
+.multi-select-filter-all {
   margin-top: 5px;
   border-bottom: 1px solid var(--line);
   font-weight: 750;
 }
 
 .comparison-check input,
-.comparison-filter-option input {
+.multi-select-filter-option input {
   width: 16px;
   height: 16px;
   accent-color: var(--green);

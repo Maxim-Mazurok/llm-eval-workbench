@@ -8,6 +8,7 @@ import {
   getBenchmark,
 } from "./benchmarks/registry.mjs";
 import {
+  benchmarkDataIsOutdated,
   buildPromptMessages,
   compactResult,
   discardResumeArtifacts,
@@ -1419,6 +1420,7 @@ export function createRuntimeServer({
       finishedAt: null,
       benchmark: benchmark.id,
       benchmarkDataRevision: benchmark.dataRevision || null,
+      benchmarkDataOutdated: false,
       datasetSize: allProblems.length,
       model: String(config.model || "").trim(),
       providerId,
@@ -1763,14 +1765,25 @@ export function createRuntimeServer({
           abortController: null,
           abortControllers: new Set(),
         };
-        if (!Number.isFinite(run.datasetSize)) {
-          try {
-            const benchmark = getBenchmark(run.benchmark);
-            const allProblems = await loadBenchmarkProblems(benchmark);
-            run.datasetSize = allProblems.length;
-          } catch {
-            run.datasetSize = null;
-          }
+        try {
+          const benchmark = getBenchmark(run.benchmark);
+          const allProblems = await loadBenchmarkProblems(benchmark);
+          const hasConfiguredTestNumbers = String(run.publicConfig?.testNumbers || "").trim().length > 0;
+          const selectedTaskCount = new Set(run.selectedIndices || []).size;
+          const savedDatasetSize = Number.isFinite(run.datasetSize)
+            ? run.datasetSize
+            : !hasConfiguredTestNumbers && selectedTaskCount > 0
+              ? selectedTaskCount
+              : null;
+          run.datasetSize = savedDatasetSize ?? allProblems.length;
+          run.benchmarkDataOutdated = benchmarkDataIsOutdated(
+            run,
+            benchmark.dataRevision || null,
+            allProblems.length,
+          );
+        } catch {
+          run.benchmarkDataOutdated = false;
+          if (!Number.isFinite(run.datasetSize)) run.datasetSize = null;
         }
         if (run.adaptiveRepetitionPenalty) {
           const penaltyState = restoreAdaptiveRepetitionPenaltyState(

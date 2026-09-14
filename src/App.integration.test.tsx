@@ -1965,6 +1965,83 @@ describe("App notifications", () => {
     expect(window.location.pathname).toBe("/run/run-1");
   });
 
+  it("loads and updates benchmark comparison controls through the URL", async () => {
+    class ComparisonResizeObserver {
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ComparisonResizeObserver);
+    window.history.replaceState(
+      null,
+      "",
+      "/comparison?benchmark=humaneval&model=model-one&best=false&complete=false&outdated=false&view=table"
+    );
+    const runs = [
+      baseRun({ id: "run-1", status: "completed", model: "model-one", completed: 2 }),
+      baseRun({ id: "run-2", status: "completed", model: "model-two", completed: 2 })
+    ];
+    const fetchMock = vi.fn(() => jsonResponse({ runs }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Only best model result" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Ignore incomplete passes" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Ignore outdated results" })).not.toBeChecked();
+    await userEvent.click(screen.getByText("Models"));
+    expect(screen.getByRole("checkbox", { name: "model-one" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "model-two" })).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "model-two" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Only best model result" }));
+    await userEvent.click(screen.getByRole("button", { name: "Chart" }));
+
+    const searchParameters = new URLSearchParams(window.location.search);
+    expect(searchParameters.getAll("benchmark")).toEqual(["humaneval"]);
+    expect(searchParameters.getAll("model")).toEqual(["model-one", "model-two"]);
+    expect(searchParameters.has("best")).toBe(false);
+    expect(searchParameters.get("complete")).toBe("false");
+    expect(searchParameters.get("outdated")).toBe("false");
+    expect(searchParameters.has("view")).toBe(false);
+  });
+
+  it("preserves benchmark and model selections between the run list and comparison", async () => {
+    class ComparisonResizeObserver {
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ComparisonResizeObserver);
+    window.history.replaceState(
+      null,
+      "",
+      "/new?benchmark=humaneval&benchmark=bbeh-mini&model=model-one&model=model-two"
+    );
+    const runs = [
+      baseRun({ id: "run-1", status: "completed", model: "model-one", completed: 2 }),
+      baseRun({ id: "run-2", status: "completed", model: "model-two", completed: 2, config: { benchmark: "bbeh-mini" } })
+    ];
+    vi.stubGlobal("fetch", vi.fn(() => jsonResponse({ runs })));
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /model-one.*HumanEval/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /model-two.*BBEH Mini/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Compare results/i }));
+
+    expect(window.location.pathname).toBe("/comparison");
+    expect(new URLSearchParams(window.location.search).getAll("benchmark")).toEqual(["humaneval", "bbeh-mini"]);
+    expect(new URLSearchParams(window.location.search).getAll("model")).toEqual(["model-one", "model-two"]);
+    await userEvent.click(screen.getByRole("button", { name: /Benchmarks/ }));
+    expect(screen.getByRole("checkbox", { name: "HumanEval (code)" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "BBEH Mini (corrected)" })).toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back to benchmarks" }));
+    expect(window.location.pathname).toBe("/new");
+    expect(new URLSearchParams(window.location.search).getAll("benchmark")).toEqual(["humaneval", "bbeh-mini"]);
+    expect(new URLSearchParams(window.location.search).getAll("model")).toEqual(["model-one", "model-two"]);
+  });
+
   it("collects performance metrics only when debug performance mode is enabled", async () => {
     window.history.replaceState(null, "", "/run/run-1?debug=performance");
     const run = baseRun({

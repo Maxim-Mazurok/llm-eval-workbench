@@ -1,9 +1,10 @@
-import { ArrowLeft, BarChart3, ChevronDown, Repeat2, Search, Table2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, BarChart3, Repeat2, Table2, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
-import { benchmarkOption, runBenchmarkId, type BenchRun } from "../domain/benchmark";
+import { benchmarkOption, runBenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
 import { COMPARISON_METRICS, type ComparisonMetricId } from "../domain/comparisonChart";
 import { pct, runMeanScore, runTotal } from "../domain/runs";
 import { ComparisonScatterPlot } from "./ComparisonScatterPlot";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 
 export type ComparisonCell = {
   run: BenchRun;
@@ -62,10 +63,12 @@ export function buildComparisonRows(
   runs: BenchRun[],
   benchmarkIds: string[],
   onlyBestModelResult: boolean,
-  ignoreIncompletePasses: boolean
+  ignoreIncompletePasses: boolean,
+  ignoreOutdatedResults = true
 ) {
   const rows = new Map<string, ComparisonRow>();
   for (const run of runs) {
+    if (ignoreOutdatedResults && run.benchmarkDataOutdated) continue;
     const benchmarkId = runBenchmarkId(run);
     if (!benchmarkIds.includes(benchmarkId)) continue;
     const score = comparisonScore(run, ignoreIncompletePasses);
@@ -94,72 +97,19 @@ export function buildComparisonRows(
   }));
 }
 
-function MultiSelectFilter({
-  label,
-  options,
-  hiddenValues,
-  setHiddenValues
+type ComparisonRoute = Extract<BenchRoute, { view: "comparison" }>;
+
+export function BenchmarkComparison({
+  runs,
+  route,
+  onBack,
+  onRouteChange
 }: {
-  label: string;
-  options: Array<{ value: string; label: string }>;
-  hiddenValues: Set<string>;
-  setHiddenValues: (values: Set<string>) => void;
+  runs: BenchRun[];
+  route: ComparisonRoute;
+  onBack: () => void;
+  onRouteChange: (route: ComparisonRoute) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const filteredOptions = options.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery));
-  const visibleCount = options.length - hiddenValues.size;
-
-  return (
-    <details className="comparison-filter">
-      <summary>{label} <span>{visibleCount}/{options.length}</span><ChevronDown size={14} /></summary>
-      <div className="comparison-filter-menu">
-        <label className="comparison-filter-search">
-          <Search aria-hidden="true" size={14} />
-          <input
-            aria-label={`Filter ${label.toLocaleLowerCase()}`}
-            placeholder="Filter"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </label>
-        <label className="comparison-filter-option comparison-filter-all">
-          <input
-            checked={hiddenValues.size === 0}
-            type="checkbox"
-            onChange={() => setHiddenValues(hiddenValues.size ? new Set() : new Set(options.map((option) => option.value)))}
-          />
-          All
-        </label>
-        <div className="comparison-filter-options">
-          {filteredOptions.map((option) => (
-            <label className="comparison-filter-option" key={option.value}>
-              <input
-                checked={!hiddenValues.has(option.value)}
-                type="checkbox"
-                onChange={() => {
-                  const nextHiddenValues = new Set(hiddenValues);
-                  if (nextHiddenValues.has(option.value)) nextHiddenValues.delete(option.value);
-                  else nextHiddenValues.add(option.value);
-                  setHiddenValues(nextHiddenValues);
-                }}
-              />
-              {option.label}
-            </label>
-          ))}
-        </div>
-      </div>
-    </details>
-  );
-}
-
-export function BenchmarkComparison({ runs, onBack }: { runs: BenchRun[]; onBack: () => void }) {
-  const [hiddenBenchmarkIds, setHiddenBenchmarkIds] = useState<Set<string>>(new Set());
-  const [hiddenModels, setHiddenModels] = useState<Set<string>>(new Set());
-  const [onlyBestModelResult, setOnlyBestModelResult] = useState(true);
-  const [ignoreIncompletePasses, setIgnoreIncompletePasses] = useState(true);
-  const [view, setView] = useState<"chart" | "table">("chart");
   const [xMetricId, setXMetricId] = useState<ComparisonMetricId>("taskTime");
   const [yMetricId, setYMetricId] = useState<ComparisonMetricId>("score");
   const [sortKey, setSortKey] = useState("average");
@@ -168,9 +118,23 @@ export function BenchmarkComparison({ runs, onBack }: { runs: BenchRun[]; onBack
     benchmarkOption(left).label.localeCompare(benchmarkOption(right).label)
   )), [runs]);
   const models = useMemo(() => Array.from(new Set(runs.map((run) => run.model).filter(Boolean))).sort(), [runs]);
+  const selectedBenchmarkIds = route.selectedBenchmarkIds ?? benchmarkIds;
+  const selectedModels = route.selectedModels ?? models;
+  const hiddenBenchmarkIds = new Set(benchmarkIds.filter((benchmarkId) => !selectedBenchmarkIds.includes(benchmarkId)));
+  const hiddenModels = new Set(models.filter((model) => !selectedModels.includes(model)));
+  const onlyBestModelResult = route.onlyBestModelResult !== false;
+  const ignoreIncompletePasses = route.ignoreIncompletePasses !== false;
+  const ignoreOutdatedResults = route.ignoreOutdatedResults !== false;
+  const view = route.comparisonView ?? "chart";
   const visibleBenchmarkIds = benchmarkIds.filter((benchmarkId) => !hiddenBenchmarkIds.has(benchmarkId));
   const visibleRuns = runs.filter((run) => !hiddenModels.has(run.model));
-  const rows = buildComparisonRows(visibleRuns, visibleBenchmarkIds, onlyBestModelResult, ignoreIncompletePasses)
+  const rows = buildComparisonRows(
+    visibleRuns,
+    visibleBenchmarkIds,
+    onlyBestModelResult,
+    ignoreIncompletePasses,
+    ignoreOutdatedResults
+  )
     .sort((left, right) => {
       const direction = sortDescending ? -1 : 1;
       if (sortKey === "model") return direction * left.model.localeCompare(right.model);
@@ -203,27 +167,49 @@ export function BenchmarkComparison({ runs, onBack }: { runs: BenchRun[]; onBack
           hiddenValues={hiddenBenchmarkIds}
           label="Benchmarks"
           options={benchmarkIds.map((benchmarkId) => ({ value: benchmarkId, label: benchmarkOption(benchmarkId).label }))}
-          setHiddenValues={setHiddenBenchmarkIds}
+          setHiddenValues={(hiddenValues) => onRouteChange({
+            ...route,
+            selectedBenchmarkIds: benchmarkIds.filter((benchmarkId) => !hiddenValues.has(benchmarkId))
+          })}
         />
         <MultiSelectFilter
           hiddenValues={hiddenModels}
           label="Models"
           options={models.map((model) => ({ value: model, label: model }))}
-          setHiddenValues={setHiddenModels}
+          setHiddenValues={(hiddenValues) => onRouteChange({
+            ...route,
+            selectedModels: models.filter((model) => !hiddenValues.has(model))
+          })}
         />
         <label className="comparison-check">
-          <input checked={onlyBestModelResult} type="checkbox" onChange={(event) => setOnlyBestModelResult(event.target.checked)} />
+          <input
+            checked={onlyBestModelResult}
+            type="checkbox"
+            onChange={(event) => onRouteChange({ ...route, onlyBestModelResult: event.target.checked })}
+          />
           Only best model result
         </label>
         <label className="comparison-check">
-          <input checked={ignoreIncompletePasses} type="checkbox" onChange={(event) => setIgnoreIncompletePasses(event.target.checked)} />
+          <input
+            checked={ignoreIncompletePasses}
+            type="checkbox"
+            onChange={(event) => onRouteChange({ ...route, ignoreIncompletePasses: event.target.checked })}
+          />
           Ignore incomplete passes
         </label>
+        <label className="comparison-check">
+          <input
+            checked={ignoreOutdatedResults}
+            type="checkbox"
+            onChange={(event) => onRouteChange({ ...route, ignoreOutdatedResults: event.target.checked })}
+          />
+          Ignore outdated results
+        </label>
         <div className="comparison-view-switch" role="group" aria-label="Comparison view">
-          <button className={view === "chart" ? "active" : ""} type="button" onClick={() => setView("chart")}>
+          <button className={view === "chart" ? "active" : ""} type="button" onClick={() => onRouteChange({ ...route, comparisonView: "chart" })}>
             <BarChart3 size={15} />Chart
           </button>
-          <button className={view === "table" ? "active" : ""} type="button" onClick={() => setView("table")}>
+          <button className={view === "table" ? "active" : ""} type="button" onClick={() => onRouteChange({ ...route, comparisonView: "table" })}>
             <Table2 size={15} />Table
           </button>
         </div>

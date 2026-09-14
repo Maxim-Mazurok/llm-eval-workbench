@@ -60,14 +60,22 @@ export function runScoreSum(results = []) {
   return results.reduce((sum, result) => sum + normalizeTaskScore(result.score, result.passed), 0);
 }
 
+export function benchmarkDataIsOutdated(run, currentDataRevision, currentDatasetSize) {
+  const savedDataRevision = run.benchmarkDataRevision || null;
+  const savedDatasetSize = Number(run.datasetSize);
+  const hasRevisionChanged = Boolean(savedDataRevision && currentDataRevision && savedDataRevision !== currentDataRevision);
+  const hasDatasetSizeChanged = Number.isFinite(savedDatasetSize)
+    && savedDatasetSize > 0
+    && Number.isFinite(currentDatasetSize)
+    && savedDatasetSize !== currentDatasetSize;
+  return hasRevisionChanged || hasDatasetSizeChanged;
+}
+
 function comparisonMetrics(run) {
   const passCount = normalizePassCount(run.passCount || run.publicConfig?.passCount || 1);
-  const datasetSize = Number(run.datasetSize);
   const selectedTaskCount = new Set(run.selectedIndices || []).size;
-  const coversFullDataset = Number.isFinite(datasetSize)
-    && datasetSize > 0
-    && selectedTaskCount >= datasetSize;
-  const tasksPerPass = coversFullDataset ? datasetSize : null;
+  const hasConfiguredTestNumbers = String(run.publicConfig?.testNumbers || "").trim().length > 0;
+  const tasksPerPass = !hasConfiguredTestNumbers && selectedTaskCount > 0 ? selectedTaskCount : null;
   const resultsByPass = new Map();
   for (const result of run.results) {
     const passNumber = normalizePassCount(result.passNumber || 1);
@@ -133,6 +141,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     status: run.status,
     benchmark: run.benchmark || "humaneval",
     benchmarkDataRevision: run.benchmarkDataRevision || null,
+    benchmarkDataOutdated: Boolean(run.benchmarkDataOutdated),
     datasetSize: Number.isFinite(run.datasetSize) ? run.datasetSize : null,
     model: run.model,
     providerId: run.providerId || null,

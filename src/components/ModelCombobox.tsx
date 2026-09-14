@@ -54,11 +54,11 @@ function SearchableCombobox({
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
+    const closeWhenOutside = (event: MouseEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", closeWhenOutside);
+    return () => document.removeEventListener("click", closeWhenOutside);
   }, [open]);
 
   function openList() {
@@ -139,10 +139,7 @@ function SearchableCombobox({
               key={option.value}
               role="option"
               onMouseEnter={() => setHighlightIndex(index)}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                select(option);
-              }}
+              onClick={() => select(option)}
             >
               <span>{option.label}</span>
               {option.tag ? <em className="searchable-combobox-tag">{option.tag}</em> : null}
