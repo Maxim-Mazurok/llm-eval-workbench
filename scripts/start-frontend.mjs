@@ -28,8 +28,7 @@ const viteProcess = spawn(process.execPath, [
   "--host",
   "0.0.0.0",
   "--port",
-  String(frontendPort),
-  "--strictPort"
+  String(frontendPort)
 ], {
   stdio: "inherit"
 });
