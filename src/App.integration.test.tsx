@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -7,6 +7,8 @@ type RunFixture = {
   id: string;
   status: string;
   model: string;
+  providerId?: string | null;
+  providerName?: string | null;
   baseUrl: string;
   createdAt: string;
   startedAt?: string | null;
@@ -21,6 +23,7 @@ type RunFixture = {
   assertionsTotal: number;
   assertionScore: number;
   currentTaskId: string | null;
+  latestEventId?: number;
   requestedStopMode?: "after-task" | "after-pass" | null;
   queuedAt?: string | null;
   queuePosition?: number | null;
@@ -182,7 +185,7 @@ describe("App notifications", () => {
       if (url.endsWith("/api/runs")) {
         listCalls += 1;
         const run = listCalls === 1
-          ? baseRun({ status: "running", completed: 1, passed: 1, activeTaskIds: ["HumanEval/1"] })
+          ? baseRun({ status: "running", latestEventId: 37, completed: 1, passed: 1, activeTaskIds: ["HumanEval/1"] })
           : baseRun({
               status: "completed",
               completed: 2,
@@ -199,6 +202,7 @@ describe("App notifications", () => {
 
     render(<App />);
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(FakeEventSource.instances[0].url).toBe("http://127.0.0.1:8787/api/runs/run-1/events?after=37");
 
     FakeEventSource.instances[0].onerror?.();
 
@@ -1813,6 +1817,7 @@ describe("App notifications", () => {
     const run = baseRun({
       id: "run-2",
       status: "completed",
+      latestEventId: 37,
       model: "deep-link-model",
       completed: 2,
       passed: 1,
@@ -1963,6 +1968,60 @@ describe("App notifications", () => {
     window.dispatchEvent(new PopStateEvent("popstate"));
     await waitFor(() => expect(modelInput).toHaveValue("history-model"));
     expect(window.location.pathname).toBe("/run/run-1");
+  });
+
+  it("ignores a stale run detail response after selecting another run", async () => {
+    window.history.replaceState(null, "", "/run/run-1");
+    const firstRun = baseRun({
+      id: "run-1",
+      status: "interrupted",
+      model: "older-model",
+      providerId: "local-default",
+      providerName: "oMLX",
+      config: { providerId: "local-default", providerName: "oMLX", model: "older-model" }
+    });
+    const selectedRun = baseRun({
+      id: "run-2",
+      status: "interrupted",
+      model: "flash-model",
+      providerId: "slotstream",
+      providerName: "SlotStream",
+      config: { providerId: "slotstream", providerName: "SlotStream", model: "flash-model" }
+    });
+    let resolveFirstRunResponse: (response: Response) => void = () => undefined;
+    const firstRunResponse = new Promise<Response>((resolve) => {
+      resolveFirstRunResponse = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/providers")) {
+        return jsonResponse({
+          providers: [
+            { id: "local-default", name: "oMLX", baseUrl: "http://localhost:8000/v1", hasApiKey: false },
+            { id: "slotstream", name: "SlotStream", baseUrl: "http://localhost:11434/v1", hasApiKey: false }
+          ]
+        });
+      }
+      if (url.endsWith("/api/benchmarks")) return jsonResponse({ benchmarks: [] });
+      if (url.endsWith("/api/runs")) return jsonResponse({ runs: [firstRun, selectedRun] });
+      if (url.endsWith("/api/runs/run-1")) return firstRunResponse;
+      if (url.endsWith("/api/runs/run-2")) return jsonResponse({ ...selectedRun, events: [] });
+      return jsonResponse({ error: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: /flash-model.*interrupted/i }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("SlotStream"));
+
+    await act(async () => {
+      resolveFirstRunResponse(new Response(JSON.stringify({ ...firstRun, events: [] }), {
+        headers: { "content-type": "application/json" }
+      }));
+    });
+
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("SlotStream");
+    expect(screen.getByPlaceholderText("provider/model-name")).toHaveValue("flash-model");
   });
 
   it("loads and updates benchmark comparison controls through the URL", async () => {

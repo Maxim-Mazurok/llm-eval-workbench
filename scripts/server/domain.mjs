@@ -165,6 +165,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     assertionScore: assertionsTotal ? assertionsPassed / assertionsTotal : 0,
     comparison: comparisonMetrics(run),
     currentTaskId: run.currentTaskId,
+    latestEventId: run.eventSeq || 0,
     requestedStopMode: run.requestedStopMode ?? null,
     // Place in the waiting line while status is "queued"; null once running.
     queuedAt: run.queuedAt ?? null,

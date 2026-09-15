@@ -302,7 +302,7 @@ export function useBenchmarkController() {
       navigateTo({ view: "new" });
     }
     for (const run of nextRuns.filter((candidate) => statusIsLive(candidate.status))) {
-      connectEvents(run.id);
+      connectEvents(run.id, run.latestEventId);
     }
   }
 
@@ -338,11 +338,14 @@ export function useBenchmarkController() {
       setEvents([]);
       return;
     }
+    let requestIsCurrent = true;
+    const abortController = new AbortController();
     const startedAt = performance.now();
-    fetch(`${BENCH_API}/api/runs/${selectedRunId}`)
+    fetch(`${BENCH_API}/api/runs/${selectedRunId}`, { signal: abortController.signal })
       .then(async (response) => {
         const json = await response.json();
         if (!response.ok) throw new Error(json.error || "Failed to load run");
+        if (!requestIsCurrent) return;
         const runEvents = (json.events as EventEnvelope[] | undefined) ?? [];
         const tokenEvents = runEvents.filter((event) => event.type === "token");
         if (performanceMetricsEnabled) {
@@ -359,7 +362,7 @@ export function useBenchmarkController() {
         }
         setRuns((previous) => updateRunInPlace(previous, json));
         loadRunConfig(json);
-        if (statusIsLive(json.status)) connectEvents(json.id);
+        if (statusIsLive(json.status)) connectEvents(json.id, json.latestEventId);
         const latestTaskStartedAtMs = currentTaskStartedAtMs(json, runEvents);
         if (latestTaskStartedAtMs) {
           setTaskStartedAtByRun((previous) => ({ ...previous, [json.id]: latestTaskStartedAtMs }));
@@ -367,7 +370,14 @@ export function useBenchmarkController() {
         setEvents(runEvents);
         setTokens(tokenEvents.map((event) => event.data as unknown as TokenEvent));
       })
-      .catch((runError) => setError(runError instanceof Error ? runError.message : String(runError)));
+      .catch((runError) => {
+        if (!requestIsCurrent || runError instanceof DOMException && runError.name === "AbortError") return;
+        setError(runError instanceof Error ? runError.message : String(runError));
+      });
+    return () => {
+      requestIsCurrent = false;
+      abortController.abort();
+    };
   }, [selectedRunId]);
 
   function currentRunConfig() {
@@ -422,7 +432,7 @@ export function useBenchmarkController() {
         }).catch(() => undefined);
       }
       observedLiveRunsRef.current.add(json.id);
-      connectEvents(json.id);
+      connectEvents(json.id, json.latestEventId);
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : String(startError));
     }
@@ -503,7 +513,7 @@ export function useBenchmarkController() {
       });
       setRuns((previous) => updateRunInPlace(previous, json));
       observedLiveRunsRef.current.add(json.id);
-      connectEvents(json.id);
+      connectEvents(json.id, json.latestEventId);
       await loadRuns();
     } catch (resumeError) {
       setError(resumeError instanceof Error ? resumeError.message : String(resumeError));

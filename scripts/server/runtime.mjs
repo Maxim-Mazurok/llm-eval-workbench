@@ -1798,6 +1798,8 @@ export function createRuntimeServer({
         if (run.status === "running" || run.status === "queued") {
           run.status = "interrupted";
           run.finishedAt = run.finishedAt || new Date().toISOString();
+          run.currentTaskId = null;
+          run.requestedStopMode = null;
         }
         runs.set(run.id, run);
       } catch (error) {
@@ -2084,6 +2086,12 @@ export function createRuntimeServer({
           );
         }
         if (req.method === "GET" && runMatch[2] === "events") {
+          const queryAfterEventId = Number(url.searchParams.get("after"));
+          const headerLastEventId = Number(req.headers["last-event-id"]);
+          const replayAfterEventId = Math.max(
+            Number.isFinite(queryAfterEventId) ? queryAfterEventId : 0,
+            Number.isFinite(headerLastEventId) ? headerLastEventId : 0,
+          );
           res.writeHead(200, {
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
@@ -2091,6 +2099,7 @@ export function createRuntimeServer({
             "access-control-allow-origin": "*",
           });
           for (const event of run.events) {
+            if (Number(event.id) <= replayAfterEventId) continue;
             res.write(`id: ${event.id}\n`);
             res.write(`event: ${event.type}\n`);
             res.write(`data: ${JSON.stringify(event)}\n\n`);

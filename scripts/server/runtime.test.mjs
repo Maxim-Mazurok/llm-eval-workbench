@@ -558,6 +558,23 @@ describe("runtime server", () => {
     await reader.cancel();
     expect(sseText).toContain("event: run-started");
     expect(sseText).toContain("event: task-finished");
+
+    const firstFinishedEvent = detail.events.find(
+      (event) => event.type === "task-finished",
+    );
+    const cursorResponse = await fetch(
+      `${apiUrl}/api/runs/${created.id}/events?after=${firstFinishedEvent.id}`,
+    );
+    const cursorReader = cursorResponse.body.getReader();
+    let cursorText = "";
+    while (!cursorText.includes("event: done")) {
+      const { done, value } = await cursorReader.read();
+      if (done) break;
+      cursorText += new TextDecoder().decode(value);
+    }
+    await cursorReader.cancel();
+    expect(cursorText).not.toContain("event: run-started");
+    expect(cursorText).toContain("event: done");
   });
 
   it("uses a normal JSON completion when an endpoint ignores stream=true", async () => {
@@ -2120,6 +2137,15 @@ describe("runtime server", () => {
     // The queue itself does not survive a restart, but the run must: it
     // reloads as "interrupted" (resumable) rather than vanishing.
     const second = await startRuntime(rootDir);
+    const reloadedActive = await fetch(`${second.apiUrl}/api/runs/${active.id}`).then(
+      (response) => response.json(),
+    );
+    expect(reloadedActive).toMatchObject({
+      status: "interrupted",
+      currentTaskId: null,
+      activeTaskIds: [],
+      activeTaskStartedAt: {},
+    });
     const reloaded = await fetch(`${second.apiUrl}/api/runs/${queued.id}`).then(
       (response) => response.json(),
     );

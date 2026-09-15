@@ -43,9 +43,13 @@ export function useRunEvents({
     sourcesRef.current.delete(runId);
   }
 
-  function connectEvents(runId: string) {
+  function connectEvents(runId: string, afterEventId?: number) {
     if (sourcesRef.current.has(runId)) return;
-    const source = new EventSource(`${BENCH_API}/api/runs/${runId}/events`);
+    const eventUrl = new URL(`${BENCH_API}/api/runs/${runId}/events`);
+    if (Number.isFinite(afterEventId)) {
+      eventUrl.searchParams.set("after", String(afterEventId));
+    }
+    const source = new EventSource(eventUrl.toString());
     sourcesRef.current.set(runId, source);
     const handle = (message: MessageEvent) => {
       const messageBytes = textByteLength(String(message.data));

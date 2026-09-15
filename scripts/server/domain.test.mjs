@@ -128,6 +128,7 @@ describe("server domain helpers", () => {
   it("summarizes runs without leaking bulky result fields into compact events", () => {
     const run = runFixture({
       currentTaskId: "HumanEval/1",
+      eventSeq: 42,
       activeTaskIds: ["HumanEval/1"],
       activeTaskStartedAt: { "HumanEval/1": "2026-06-16T00:00:02.000Z" }
     });
@@ -141,6 +142,7 @@ describe("server domain helpers", () => {
       assertionsPassed: 1,
       assertionsTotal: 1,
       assertionScore: 1,
+      latestEventId: 42,
       activeTaskStartedAt: { "HumanEval/1": "2026-06-16T00:00:02.000Z" },
       config: { baseUrl: "http://localhost:8000/v1", model: "demo-model", maxOutputTokens: 2048 }
     });
