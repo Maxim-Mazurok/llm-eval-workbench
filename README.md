@@ -41,6 +41,8 @@ Each run uses exactly one benchmark.
 - Configurable pass count for rerunning the selected benchmark set multiple
   times in pass-major order.
 - Configurable task parallelism, defaulting to one task at a time.
+- Optional correlated oMLX request telemetry with per-task token, timing,
+  memory, GPU, CPU, and thermal samples saved as a separate run artifact.
 - Optional streamed loop detection with adaptive per-task repetition penalties.
 - Live pass@1 score, completed/passed/failed counts, and assertion-level stats
   (answer checks for BBEH).
@@ -197,6 +199,27 @@ their own scoring rules; see the owning pack's documentation.
 
 Pick a benchmark first. Switching benchmarks loads that benchmark's default
 system prompt and prompt template and clears task selections.
+
+### oMLX telemetry capture
+
+Enable **Capture oMLX telemetry** for an oMLX provider to measure useful-task
+requests without changing the benchmark, prompt, scoring, or task isolation.
+The workbench starts one telemetry session per run segment, correlates every
+direct OpenAI-compatible request by its task attempt ID, and stops the session
+when the run segment ends. Resuming creates another session in the same
+artifact.
+
+Telemetry is explicit and off by default. If an enabled server does not
+implement the oMLX telemetry session API, the run records telemetry as
+`unavailable` and continues without capture; ordinary runs do not probe or call
+that API. The LM Studio SDK transport reports the same non-fatal status because
+it does not support this capture path.
+
+Captured data is written to `telemetry.json` beside `run.json` and
+`results.json`. It contains the full oMLX session exports, while the run summary
+stores only status, segment count, request count, and the artifact name. The
+Context Benchmark can normalize this artifact into useful-task context
+observations.
 
 Use `Limit = 0` to run the whole dataset (164 HumanEval problems, 460 BBEH Mini
 examples, or 4,520 BBEH Full examples). To run a subset, either set `Start` and

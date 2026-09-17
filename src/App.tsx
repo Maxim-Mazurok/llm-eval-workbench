@@ -22,6 +22,7 @@ export default function App() {
     model,
     maxOutputTokens,
     thinkingEnabled,
+    captureTelemetry,
     thinkingBudget,
     timeoutSeconds,
     parallelTasks,
@@ -62,6 +63,7 @@ export default function App() {
     setModel,
     setMaxOutputTokens,
     setThinkingEnabled,
+    setCaptureTelemetry,
     setThinkingBudget,
     setTimeoutSeconds,
     setParallelTasks,
@@ -143,6 +145,7 @@ export default function App() {
           onManageProviders={() => setProviderManagerOpen(true)}
           maxOutputTokens={maxOutputTokens}
           thinkingEnabled={thinkingEnabled}
+          captureTelemetry={captureTelemetry}
           thinkingBudget={thinkingBudget}
           timeoutSeconds={timeoutSeconds}
           parallelTasks={parallelTasks}
@@ -168,6 +171,7 @@ export default function App() {
           setModel={setModel}
           setMaxOutputTokens={setMaxOutputTokens}
           setThinkingEnabled={setThinkingEnabled}
+          setCaptureTelemetry={setCaptureTelemetry}
           setThinkingBudget={setThinkingBudget}
           setTimeoutSeconds={setTimeoutSeconds}
           setParallelTasks={setParallelTasks}

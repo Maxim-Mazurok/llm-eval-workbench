@@ -252,7 +252,7 @@ export function createRuntimeServer({
     if (run.deleted) return;
     ensureRunDir(run);
     await fs.mkdir(run.dir, { recursive: true });
-    await Promise.all([
+    const writes = [
       writeFileAtomic(
         join(run.dir, "run.json"),
         JSON.stringify(persistedRunState(run), null, 2),
@@ -261,7 +261,27 @@ export function createRuntimeServer({
         join(run.dir, "results.json"),
         JSON.stringify(run.results, null, 2),
       ),
-    ]);
+    ];
+    if (run.telemetryExports?.length || run.telemetryExportErrors?.length) {
+      writes.push(
+        writeFileAtomic(
+          join(run.dir, "telemetry.json"),
+          JSON.stringify(
+            {
+              schemaVersion: 1,
+              runId: run.id,
+              benchmark: run.benchmark,
+              model: run.model,
+              sessions: run.telemetryExports,
+              exportErrors: run.telemetryExportErrors || [],
+            },
+            null,
+            2,
+          ),
+        ),
+      );
+    }
+    await Promise.all(writes);
   }
 
   const runPersistStates = new Map();
@@ -740,6 +760,12 @@ export function createRuntimeServer({
           headers: {
             "content-type": "application/json",
             ...(run.apiKey ? { authorization: `Bearer ${run.apiKey}` } : {}),
+            ...(run.activeTelemetrySessionId
+              ? {
+                  "x-omlx-telemetry-session": run.activeTelemetrySessionId,
+                  "x-request-id": context.attemptId || problem.task_id,
+                }
+              : {}),
           },
           body: JSON.stringify(body),
           signal: controller.signal,
@@ -763,6 +789,122 @@ export function createRuntimeServer({
       run.abortControllers?.delete(controller);
       if (run.abortController === controller) run.abortController = null;
     }
+  }
+
+  function telemetryRequestHeaders(run) {
+    return {
+      "content-type": "application/json",
+      ...(run.apiKey ? { authorization: `Bearer ${run.apiKey}` } : {}),
+    };
+  }
+
+  async function startRunTelemetry(run) {
+    if (!run.captureTelemetry) return;
+    if (run.usesLmStudioSdk) {
+      run.telemetry = {
+        status: "unavailable",
+        sessionCount: run.telemetry?.sessionCount || 0,
+        activeSessionId: null,
+        artifact: null,
+        error: "oMLX telemetry is unavailable through the LM Studio SDK transport.",
+      };
+      appendEvent(run, "telemetry-unavailable", { message: run.telemetry.error });
+      return;
+    }
+    const sessionId = `${run.id}-${Date.now().toString(36)}`;
+    try {
+      const response = await fetchImplementation(`${run.baseUrl}/telemetry/sessions`, {
+        method: "POST",
+        headers: telemetryRequestHeaders(run),
+        body: JSON.stringify({
+          session_id: sessionId,
+          metadata: {
+            source: "llm-eval-workbench",
+            run_id: run.id,
+            benchmark: run.benchmark,
+            model: run.model,
+          },
+          sample_interval_seconds: 0.1,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(
+          `Could not start oMLX telemetry: HTTP ${response.status} ${detail.slice(0, 500)}`,
+        );
+      }
+      const payload = await response.json();
+      run.activeTelemetrySessionId = String(payload.session_id || sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      run.telemetry = {
+        status: "unavailable",
+        sessionCount: run.telemetry?.sessionCount || 0,
+        activeSessionId: null,
+        artifact: null,
+        error: message,
+      };
+      appendEvent(run, "telemetry-unavailable", { message });
+      return;
+    }
+    run.telemetry = {
+      status: "recording",
+      sessionCount: (run.telemetry?.sessionCount || 0) + 1,
+      activeSessionId: run.activeTelemetrySessionId,
+      artifact: "telemetry.json",
+      error: null,
+    };
+    appendEvent(run, "telemetry-started", {
+      sessionId: run.activeTelemetrySessionId,
+    });
+  }
+
+  async function stopRunTelemetry(run) {
+    const sessionId = run.activeTelemetrySessionId;
+    if (!sessionId) return;
+    run.activeTelemetrySessionId = null;
+    let telemetryExport;
+    try {
+      const response = await fetchImplementation(
+        `${run.baseUrl}/telemetry/sessions/${encodeURIComponent(sessionId)}/stop`,
+        {
+          method: "POST",
+          headers: telemetryRequestHeaders(run),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(
+          `Could not stop oMLX telemetry: HTTP ${response.status} ${detail.slice(0, 500)}`,
+        );
+      }
+      telemetryExport = await response.json();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      run.telemetry = { ...run.telemetry, status: "error", error: message };
+      run.telemetryExportErrors ??= [];
+      run.telemetryExportErrors.push({ sessionId, message });
+      appendEvent(run, "telemetry-error", { message });
+      return;
+    }
+    run.telemetryExports ??= [];
+    run.telemetryExports.push(telemetryExport);
+    run.telemetry = {
+      ...run.telemetry,
+      status: "completed",
+      activeSessionId: null,
+      requestCount: run.telemetryExports.reduce(
+        (totalRequests, session) => totalRequests + (session.requests?.length || 0),
+        0,
+      ),
+      error: null,
+    };
+    appendEvent(run, "telemetry-finished", {
+      sessionId,
+      requestCount: telemetryExport.requests?.length || 0,
+    });
   }
 
   async function runBenchmark(run) {
@@ -797,6 +939,7 @@ export function createRuntimeServer({
       syncRunCountsFromResults(run);
       run.activeTaskIds = [];
       run.activeTaskStartedAt = {};
+      await startRunTelemetry(run);
       const completedAttemptIds = new Set(
         run.results.map(resultAttemptId).filter(Boolean),
       );
@@ -1144,6 +1287,7 @@ export function createRuntimeServer({
           );
         }
       }
+      await stopRunTelemetry(run);
       run.status = "completed";
       run.finishedAt = new Date().toISOString();
       run.activeTaskIds = [];
@@ -1155,6 +1299,16 @@ export function createRuntimeServer({
       logTerminalRunPerformance(run, run.status);
       persistRunArtifacts(run);
     } catch (error) {
+      try {
+        await stopRunTelemetry(run);
+      } catch (telemetryError) {
+        appendEvent(run, "telemetry-error", {
+          message:
+            telemetryError instanceof Error
+              ? telemetryError.message
+              : String(telemetryError),
+        });
+      }
       run.status = run.cancelled ? "cancelled" : "error";
       run.requestedStopMode = null;
       run.finishedAt = new Date().toISOString();
@@ -1449,6 +1603,7 @@ export function createRuntimeServer({
         config.extraBody && typeof config.extraBody === "object"
           ? config.extraBody
           : {},
+          captureTelemetry: Boolean(config.captureTelemetry),
       adaptiveRepetitionPenalty,
       repetitionPenalty,
       currentRepetitionPenalty: initialRepetitionPenalty(
@@ -1483,6 +1638,7 @@ export function createRuntimeServer({
           config.extraBody && typeof config.extraBody === "object"
             ? config.extraBody
             : {},
+          captureTelemetry: Boolean(config.captureTelemetry),
         adaptiveRepetitionPenalty,
         repetitionPenalty,
         benchmarkMentionRegex:
@@ -1506,6 +1662,10 @@ export function createRuntimeServer({
       requestedStopMode: null,
       abortController: null,
       abortControllers: new Set(),
+      activeTelemetrySessionId: null,
+      telemetry: null,
+      telemetryExports: [],
+      telemetryExportErrors: [],
     };
     if (!run.model) throw new Error("Model name is required.");
     runs.set(id, run);
@@ -1621,6 +1781,8 @@ export function createRuntimeServer({
       config.extraBody && typeof config.extraBody === "object"
         ? config.extraBody
         : run.extraBody;
+    run.captureTelemetry =
+      config.captureTelemetry ?? run.captureTelemetry ?? false;
     run.adaptiveRepetitionPenalty = adaptiveRepetitionPenalty;
     run.repetitionPenalty = repetitionPenalty;
     if (
@@ -1655,6 +1817,7 @@ export function createRuntimeServer({
       systemPrompt: run.systemPrompt,
       promptTemplate: run.promptTemplate,
       extraBody: run.extraBody,
+      captureTelemetry: run.captureTelemetry,
       adaptiveRepetitionPenalty,
       repetitionPenalty,
       benchmarkMentionRegex:
@@ -1732,6 +1895,10 @@ export function createRuntimeServer({
           .readFile(join(dir, "results.json"), "utf8")
           .catch(() => "[]");
         const results = JSON.parse(resultsRaw);
+        const telemetryRaw = await fs
+          .readFile(join(dir, "telemetry.json"), "utf8")
+          .catch(() => "");
+        const telemetryArtifact = telemetryRaw ? JSON.parse(telemetryRaw) : null;
         const persistedRuntimeConfig = runtimeConfigFromPersistedRun(persisted);
         if (persistedRuntimeConfig.providerId) {
           try {
@@ -1764,6 +1931,13 @@ export function createRuntimeServer({
           cancelled: persisted.status === "cancelled",
           abortController: null,
           abortControllers: new Set(),
+          activeTelemetrySessionId: null,
+          telemetryExports: Array.isArray(telemetryArtifact?.sessions)
+            ? telemetryArtifact.sessions
+            : [],
+          telemetryExportErrors: Array.isArray(telemetryArtifact?.exportErrors)
+            ? telemetryArtifact.exportErrors
+            : [],
         };
         try {
           const benchmark = getBenchmark(run.benchmark);

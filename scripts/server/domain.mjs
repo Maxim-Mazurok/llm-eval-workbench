@@ -172,6 +172,7 @@ export function runSummary(run, { includeResults = true } = {}) {
     queuePosition: run.queuePosition ?? null,
     activeTaskIds: run.activeTaskIds || [],
     activeTaskStartedAt: run.activeTaskStartedAt || {},
+    telemetry: run.telemetry || null,
     config: {
       baseUrl: run.baseUrl,
       model: run.model,
@@ -221,6 +222,7 @@ export function runtimeConfigFromPersistedRun(persisted) {
     systemPrompt: String(persistedConfig.systemPrompt ?? persisted.systemPrompt ?? defaultSystemPrompt),
     promptTemplate: String(persistedConfig.promptTemplate ?? persisted.promptTemplate ?? defaultPromptTemplate),
     extraBody: persistedConfig.extraBody && typeof persistedConfig.extraBody === "object" ? persistedConfig.extraBody : {},
+    captureTelemetry: Boolean(persistedConfig.captureTelemetry),
     adaptiveRepetitionPenalty: Boolean(persistedConfig.adaptiveRepetitionPenalty),
     repetitionPenalty: Number(persistedConfig.repetitionPenalty ?? 1),
     parallelTasks: normalizeParallelTasks(persistedConfig.parallelTasks ?? persisted.parallelTasks),

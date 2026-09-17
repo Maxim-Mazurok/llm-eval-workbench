@@ -282,6 +282,7 @@ describe("App notifications", () => {
     await userEvent.clear(screen.getByLabelText("Prompt template"));
     await userEvent.type(screen.getByLabelText("Prompt template"), "prompt %problem_code%");
     await userEvent.click(screen.getByLabelText("Abort loops and adapt repetition penalty"));
+    await userEvent.click(screen.getByLabelText("Capture oMLX telemetry"));
     fireEvent.change(screen.getByLabelText("Extra request body"), { target: { value: "{\"top_p\":0.25}" } });
 
     await userEvent.click(screen.getByRole("button", { name: /start run/i }));
@@ -293,6 +294,7 @@ describe("App notifications", () => {
       parallelTasks: 1,
       passCount: 100,
       adaptiveRepetitionPenalty: true,
+      captureTelemetry: true,
       benchmarkMentionRegex: String.raw`\bhuman[\s_-]*eval\b`,
       systemPrompt: "system",
       promptTemplate: "prompt %problem_code%",

@@ -577,6 +577,198 @@ describe("runtime server", () => {
     expect(cursorText).toContain("event: done");
   });
 
+  it("captures oMLX telemetry for tagged tasks and persists a separate artifact", async () => {
+    const rootDir = await makeRootDir();
+    const telemetryRequestIds = [];
+    const model = await startModelServer([
+      (req, res, body) => {
+        if (req.url === "/v1/telemetry/sessions") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ session_id: body.session_id }));
+          return;
+        }
+        if (req.url.endsWith("/stop")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              session_id: req.url.split("/").at(-2),
+              requests: telemetryRequestIds.map((requestId) => ({
+                request_id: requestId,
+                status: "completed",
+              })),
+            }),
+          );
+          return;
+        }
+        telemetryRequestIds.push(req.headers["x-request-id"]);
+        goodModelHandler(req, res, body);
+      },
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      captureTelemetry: true,
+      testNumbers: "0",
+    });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(telemetryRequestIds).toEqual(["HumanEval/0::pass-1"]);
+    const taskRequest = model.requests.find(
+      (request) => request.url === "/v1/chat/completions",
+    );
+    expect(taskRequest.headers["x-omlx-telemetry-session"]).toMatch(
+      new RegExp(`^${created.id}-`),
+    );
+    expect(detail.telemetry).toMatchObject({
+      status: "completed",
+      sessionCount: 1,
+      requestCount: 1,
+      artifact: "telemetry.json",
+    });
+
+    const [runDirectoryName] = await fs.readdir(join(rootDir, "benchmark-runs"));
+    const telemetryArtifact = JSON.parse(
+      await fs.readFile(
+        join(rootDir, "benchmark-runs", runDirectoryName, "telemetry.json"),
+        "utf8",
+      ),
+    );
+    expect(telemetryArtifact).toMatchObject({
+      schemaVersion: 1,
+      runId: created.id,
+      benchmark: "humaneval",
+      model: "test-model",
+    });
+    expect(telemetryArtifact.sessions[0].requests[0]).toEqual({
+      request_id: "HumanEval/0::pass-1",
+      status: "completed",
+    });
+  });
+
+  it("appends a telemetry segment when a persisted run resumes after restart", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res, body) => {
+        if (req.url === "/v1/telemetry/sessions") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ session_id: body.session_id }));
+          return;
+        }
+        if (req.url.endsWith("/stop")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              session_id: req.url.split("/").at(-2),
+              requests: [],
+            }),
+          );
+          return;
+        }
+        goodModelHandler(req, res, body);
+      },
+    ]);
+    const first = await startRuntime(rootDir);
+    const created = await createRun(first.apiUrl, model.baseUrl, {
+      captureTelemetry: true,
+      testNumbers: "0",
+    });
+    await waitForStatus(first.apiUrl, created.id, ["completed"]);
+
+    const second = await startRuntime(rootDir);
+    const resumeResponse = await fetch(
+      `${second.apiUrl}/api/runs/${created.id}/resume`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ testNumbers: "0-1" }),
+      },
+    );
+    expect(resumeResponse.ok).toBe(true);
+    await waitForStatus(second.apiUrl, created.id, ["completed"]);
+
+    const [runDirectoryName] = await fs.readdir(join(rootDir, "benchmark-runs"));
+    const telemetryArtifact = JSON.parse(
+      await fs.readFile(
+        join(rootDir, "benchmark-runs", runDirectoryName, "telemetry.json"),
+        "utf8",
+      ),
+    );
+    expect(telemetryArtifact.sessions).toHaveLength(2);
+    expect(telemetryArtifact.sessions[0].session_id).not.toBe(
+      telemetryArtifact.sessions[1].session_id,
+    );
+  });
+
+  it("continues the benchmark when the endpoint does not support telemetry", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res, body) => {
+        if (req.url === "/v1/telemetry/sessions") {
+          res.writeHead(404, { "content-type": "application/json" });
+          res.end(JSON.stringify({ detail: "Not Found" }));
+          return;
+        }
+        goodModelHandler(req, res, body);
+      },
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      captureTelemetry: true,
+      testNumbers: "0",
+    });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail.passed).toBe(1);
+    expect(detail.telemetry).toMatchObject({
+      status: "unavailable",
+      sessionCount: 0,
+      artifact: null,
+    });
+    expect(detail.telemetry.error).toContain("HTTP 404");
+  });
+
+  it("completes the benchmark when telemetry export fails", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (req, res, body) => {
+        if (req.url === "/v1/telemetry/sessions") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ session_id: body.session_id }));
+          return;
+        }
+        if (req.url.endsWith("/stop")) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ detail: "export failed" }));
+          return;
+        }
+        goodModelHandler(req, res, body);
+      },
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      captureTelemetry: true,
+      testNumbers: "0",
+    });
+    const detail = await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    expect(detail.passed).toBe(1);
+    expect(detail.telemetry.status).toBe("error");
+    expect(detail.telemetry.error).toContain("HTTP 500");
+    const [runDirectoryName] = await fs.readdir(join(rootDir, "benchmark-runs"));
+    const telemetryArtifact = JSON.parse(
+      await fs.readFile(
+        join(rootDir, "benchmark-runs", runDirectoryName, "telemetry.json"),
+        "utf8",
+      ),
+    );
+    expect(telemetryArtifact.sessions).toEqual([]);
+    expect(telemetryArtifact.exportErrors).toEqual([
+      expect.objectContaining({ message: expect.stringContaining("HTTP 500") }),
+    ]);
+  });
+
   it("uses a normal JSON completion when an endpoint ignores stream=true", async () => {
     const rootDir = await makeRootDir();
     const model = await startModelServer([nonStreamingGoodModelHandler]);

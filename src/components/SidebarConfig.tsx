@@ -38,6 +38,7 @@ export type SidebarConfigProps = {
   onManageProviders: () => void;
   maxOutputTokens: number;
   thinkingEnabled: boolean;
+  captureTelemetry: boolean;
   thinkingBudget: number;
   timeoutSeconds: number;
   parallelTasks: number;
@@ -64,6 +65,7 @@ export type SidebarConfigProps = {
   setModel: (value: string) => void;
   setMaxOutputTokens: (value: number) => void;
   setThinkingEnabled: (value: boolean) => void;
+  setCaptureTelemetry: (value: boolean) => void;
   setThinkingBudget: (value: number) => void;
   setTimeoutSeconds: (value: number) => void;
   setParallelTasks: (value: number) => void;
@@ -276,6 +278,14 @@ export function SidebarConfig(props: SidebarConfigProps) {
           onChange={(event) => props.setThinkingEnabled(event.target.checked)}
         />
         <span>Thinking</span>
+      </label>
+      <label className="field checkbox-field">
+        <input
+          checked={props.captureTelemetry}
+          type="checkbox"
+          onChange={(event) => props.setCaptureTelemetry(event.target.checked)}
+        />
+        <span>Capture oMLX telemetry</span>
       </label>
       <div className="bench-number-grid">
         <label className="field">

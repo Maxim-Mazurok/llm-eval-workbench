@@ -197,6 +197,7 @@ export const DEFAULT_FORM_VALUES = {
   model: "",
   maxOutputTokens: 2048,
   thinkingEnabled: true,
+  captureTelemetry: false,
   thinkingBudget: 8192,
   timeoutSeconds: 15,
   parallelTasks: 1,
@@ -338,6 +339,7 @@ export type BenchRun = {
     testNumbers?: string;
     maxOutputTokens?: number;
     thinkingEnabled?: boolean;
+    captureTelemetry?: boolean;
     thinkingBudget?: number;
     timeoutSeconds?: number;
     parallelTasks?: number;

@@ -24,6 +24,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   const [model, setModel] = useState(DEFAULT_FORM_VALUES.model);
   const [maxOutputTokens, setMaxOutputTokens] = useState(DEFAULT_FORM_VALUES.maxOutputTokens);
   const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_FORM_VALUES.thinkingEnabled);
+  const [captureTelemetry, setCaptureTelemetry] = useState(DEFAULT_FORM_VALUES.captureTelemetry);
   const [thinkingBudget, setThinkingBudget] = useState(DEFAULT_FORM_VALUES.thinkingBudget);
   const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_FORM_VALUES.timeoutSeconds);
   const [parallelTasks, setParallelTasks] = useState(DEFAULT_FORM_VALUES.parallelTasks);
@@ -60,6 +61,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setModel(DEFAULT_FORM_VALUES.model);
     setMaxOutputTokens(DEFAULT_FORM_VALUES.maxOutputTokens);
     setThinkingEnabled(DEFAULT_FORM_VALUES.thinkingEnabled);
+    setCaptureTelemetry(DEFAULT_FORM_VALUES.captureTelemetry);
     setThinkingBudget(DEFAULT_FORM_VALUES.thinkingBudget);
     setTimeoutSeconds(DEFAULT_FORM_VALUES.timeoutSeconds);
     setParallelTasks(DEFAULT_FORM_VALUES.parallelTasks);
@@ -84,6 +86,7 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setModel(config.model ?? run.model ?? "");
     setMaxOutputTokens(Number(config.maxOutputTokens ?? DEFAULT_FORM_VALUES.maxOutputTokens));
     setThinkingEnabled(config.thinkingEnabled ?? DEFAULT_FORM_VALUES.thinkingEnabled);
+    setCaptureTelemetry(config.captureTelemetry ?? DEFAULT_FORM_VALUES.captureTelemetry);
     setThinkingBudget(Number(config.thinkingBudget ?? DEFAULT_FORM_VALUES.thinkingBudget));
     setTimeoutSeconds(Number(config.timeoutSeconds ?? 15));
     setParallelTasks(normalizeParallelTasks(Number(config.parallelTasks ?? 1)));
@@ -100,10 +103,10 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   }
 
   return {
-    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, thinkingBudget, timeoutSeconds, parallelTasks,
+    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, captureTelemetry, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, benchmarkMentionRegex, sampleLimit, startIndex, testNumbers,
     systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
-    setMaxOutputTokens, setThinkingEnabled, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
+    setMaxOutputTokens, setThinkingEnabled, setCaptureTelemetry, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
     setAdaptiveRepetitionPenalty(value: boolean) {
       setAdaptiveRepetitionPenaltyState(value);
       if (value) setParallelTasks(1);
