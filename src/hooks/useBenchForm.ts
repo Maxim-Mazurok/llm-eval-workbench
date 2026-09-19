@@ -23,7 +23,8 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   const [providerId, setProviderId] = useState(DEFAULT_FORM_VALUES.providerId);
   const [model, setModel] = useState(DEFAULT_FORM_VALUES.model);
   const [maxOutputTokens, setMaxOutputTokens] = useState(DEFAULT_FORM_VALUES.maxOutputTokens);
-  const [thinkingEnabled, setThinkingEnabled] = useState(DEFAULT_FORM_VALUES.thinkingEnabled);
+  const [thinkingEnabled, setThinkingEnabledState] = useState(DEFAULT_FORM_VALUES.thinkingEnabled);
+  const [forceThinking, setForceThinking] = useState(DEFAULT_FORM_VALUES.forceThinking);
   const [captureTelemetry, setCaptureTelemetry] = useState(DEFAULT_FORM_VALUES.captureTelemetry);
   const [thinkingBudget, setThinkingBudget] = useState(DEFAULT_FORM_VALUES.thinkingBudget);
   const [timeoutSeconds, setTimeoutSeconds] = useState(DEFAULT_FORM_VALUES.timeoutSeconds);
@@ -60,7 +61,8 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     setBenchmarkState(DEFAULT_FORM_VALUES.benchmark);
     setModel(DEFAULT_FORM_VALUES.model);
     setMaxOutputTokens(DEFAULT_FORM_VALUES.maxOutputTokens);
-    setThinkingEnabled(DEFAULT_FORM_VALUES.thinkingEnabled);
+    setThinkingEnabledState(DEFAULT_FORM_VALUES.thinkingEnabled);
+    setForceThinking(DEFAULT_FORM_VALUES.forceThinking);
     setCaptureTelemetry(DEFAULT_FORM_VALUES.captureTelemetry);
     setThinkingBudget(DEFAULT_FORM_VALUES.thinkingBudget);
     setTimeoutSeconds(DEFAULT_FORM_VALUES.timeoutSeconds);
@@ -85,7 +87,8 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
     if (config.providerId ?? run.providerId) setProviderId(String(config.providerId ?? run.providerId));
     setModel(config.model ?? run.model ?? "");
     setMaxOutputTokens(Number(config.maxOutputTokens ?? DEFAULT_FORM_VALUES.maxOutputTokens));
-    setThinkingEnabled(config.thinkingEnabled ?? DEFAULT_FORM_VALUES.thinkingEnabled);
+    setThinkingEnabledState(config.thinkingEnabled ?? DEFAULT_FORM_VALUES.thinkingEnabled);
+    setForceThinking(config.forceThinking ?? DEFAULT_FORM_VALUES.forceThinking);
     setCaptureTelemetry(config.captureTelemetry ?? DEFAULT_FORM_VALUES.captureTelemetry);
     setThinkingBudget(Number(config.thinkingBudget ?? DEFAULT_FORM_VALUES.thinkingBudget));
     setTimeoutSeconds(Number(config.timeoutSeconds ?? 15));
@@ -103,10 +106,15 @@ export function useBenchForm(systemPromptByBenchmark: Record<string, string> = {
   }
 
   return {
-    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, captureTelemetry, thinkingBudget, timeoutSeconds, parallelTasks,
+    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, forceThinking, captureTelemetry, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, benchmarkMentionRegex, sampleLimit, startIndex, testNumbers,
     systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
-    setMaxOutputTokens, setThinkingEnabled, setCaptureTelemetry, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
+    setMaxOutputTokens,
+    setThinkingEnabled(value: boolean) {
+      setThinkingEnabledState(value);
+      if (!value) setForceThinking(false);
+    },
+    setForceThinking, setCaptureTelemetry, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount,
     setAdaptiveRepetitionPenalty(value: boolean) {
       setAdaptiveRepetitionPenaltyState(value);
       if (value) setParallelTasks(1);

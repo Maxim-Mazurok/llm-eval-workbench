@@ -8,7 +8,8 @@ import {
   RotateCcw,
   Server,
   Settings2,
-  TerminalSquare
+  TerminalSquare,
+  TriangleAlert
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -19,6 +20,11 @@ import {
 import { normalizeParallelTasks, normalizePassCount, runCanResume, statusIsLive, type RunStopMode } from "../domain/runs";
 import { providerKindLabel, type ProviderConfig } from "../domain/providers";
 import { BenchmarkCombobox, ModelCombobox, ProviderCombobox } from "./ModelCombobox";
+
+const forceThinkingFallbackHint =
+  "This endpoint cannot open the model's reasoning channel directly, so forcing falls back "
+  + "to a prompt instruction the model may ignore. Native forcing needs an endpoint that "
+  + "advertises force_thinking for this model (for example oMLX with Gemma 4).";
 
 export type SidebarConfigProps = {
   benchmark: BenchmarkId;
@@ -33,11 +39,14 @@ export type SidebarConfigProps = {
   availableModelsLoading: boolean;
   /** id → oMLX model_type ("vlm" = vision-capable); empty when unknown. */
   modelTypes: Record<string, string>;
+  /** id → whether the endpoint can force the reasoning channel open natively. */
+  forceThinkingModels: Record<string, boolean>;
   /** Refetches the model list; called whenever the combobox opens. */
   onRefreshModels: () => void;
   onManageProviders: () => void;
   maxOutputTokens: number;
   thinkingEnabled: boolean;
+  forceThinking: boolean;
   captureTelemetry: boolean;
   thinkingBudget: number;
   timeoutSeconds: number;
@@ -65,6 +74,7 @@ export type SidebarConfigProps = {
   setModel: (value: string) => void;
   setMaxOutputTokens: (value: number) => void;
   setThinkingEnabled: (value: boolean) => void;
+  setForceThinking: (value: boolean) => void;
   setCaptureTelemetry: (value: boolean) => void;
   setThinkingBudget: (value: number) => void;
   setTimeoutSeconds: (value: number) => void;
@@ -278,6 +288,20 @@ export function SidebarConfig(props: SidebarConfigProps) {
           onChange={(event) => props.setThinkingEnabled(event.target.checked)}
         />
         <span>Thinking</span>
+      </label>
+      <label className="field checkbox-field">
+        <input
+          checked={props.forceThinking}
+          disabled={!props.thinkingEnabled}
+          type="checkbox"
+          onChange={(event) => props.setForceThinking(event.target.checked)}
+        />
+        <span>Force thinking</span>
+        {props.forceThinkingModels[props.model.trim()] ? null : (
+          <span aria-hidden="true" className="field-warning-icon" title={forceThinkingFallbackHint}>
+            <TriangleAlert size={13} />
+          </span>
+        )}
       </label>
       <label className="field checkbox-field">
         <input

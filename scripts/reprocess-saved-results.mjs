@@ -66,7 +66,7 @@ export async function discoverSavedRuns(runsDir, { benchmarkIds = ["humaneval"] 
   const entries = await fs.readdir(runsDir, { withFileTypes: true });
   const runs = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const directory = join(runsDir, entry.name);
     try {
       const [runText, resultsText] = await Promise.all([

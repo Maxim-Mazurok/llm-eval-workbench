@@ -22,6 +22,7 @@ export default function App() {
     model,
     maxOutputTokens,
     thinkingEnabled,
+    forceThinking,
     captureTelemetry,
     thinkingBudget,
     timeoutSeconds,
@@ -63,6 +64,7 @@ export default function App() {
     setModel,
     setMaxOutputTokens,
     setThinkingEnabled,
+    setForceThinking,
     setCaptureTelemetry,
     setThinkingBudget,
     setTimeoutSeconds,
@@ -101,6 +103,7 @@ export default function App() {
   const {
     models: availableModels,
     modelTypes: availableModelTypes,
+    forceThinkingModels: availableForceThinkingModels,
     loading: availableModelsLoading,
     refresh: refreshAvailableModels
   } = useAvailableModels(providerId);
@@ -141,10 +144,12 @@ export default function App() {
           availableModels={availableModels}
           availableModelsLoading={availableModelsLoading}
           modelTypes={availableModelTypes}
+          forceThinkingModels={availableForceThinkingModels}
           onRefreshModels={refreshAvailableModels}
           onManageProviders={() => setProviderManagerOpen(true)}
           maxOutputTokens={maxOutputTokens}
           thinkingEnabled={thinkingEnabled}
+          forceThinking={forceThinking}
           captureTelemetry={captureTelemetry}
           thinkingBudget={thinkingBudget}
           timeoutSeconds={timeoutSeconds}
@@ -171,6 +176,7 @@ export default function App() {
           setModel={setModel}
           setMaxOutputTokens={setMaxOutputTokens}
           setThinkingEnabled={setThinkingEnabled}
+          setForceThinking={setForceThinking}
           setCaptureTelemetry={setCaptureTelemetry}
           setThinkingBudget={setThinkingBudget}
           setTimeoutSeconds={setTimeoutSeconds}

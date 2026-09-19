@@ -30,7 +30,7 @@ function runSettings(run: BenchRun) {
     `${config.maxOutputTokens ?? "?"} output`,
     config.thinkingEnabled === false
       ? "thinking off"
-      : `${config.thinkingBudget ?? "?"} thinking`,
+      : `${config.thinkingBudget ?? "?"} thinking${config.forceThinking ? " forced" : ""}`,
     `temperature ${config.temperature ?? 0}`
   ];
   if (config.adaptiveRepetitionPenalty) settings.push("adaptive repetition");
@@ -45,6 +45,7 @@ function configurationKey(run: BenchRun) {
     provider: run.providerId || config.providerId || providerLabel(run),
     maxOutputTokens: config.maxOutputTokens,
     thinkingEnabled: config.thinkingEnabled,
+    forceThinking: config.forceThinking,
     thinkingBudget: config.thinkingBudget,
     temperature: config.temperature,
     adaptiveRepetitionPenalty: config.adaptiveRepetitionPenalty,

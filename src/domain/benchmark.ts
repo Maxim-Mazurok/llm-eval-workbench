@@ -197,6 +197,7 @@ export const DEFAULT_FORM_VALUES = {
   model: "",
   maxOutputTokens: 2048,
   thinkingEnabled: true,
+  forceThinking: false,
   captureTelemetry: false,
   thinkingBudget: 8192,
   timeoutSeconds: 15,
@@ -339,6 +340,7 @@ export type BenchRun = {
     testNumbers?: string;
     maxOutputTokens?: number;
     thinkingEnabled?: boolean;
+    forceThinking?: boolean;
     captureTelemetry?: boolean;
     thinkingBudget?: number;
     timeoutSeconds?: number;
@@ -434,6 +436,8 @@ export type BenchTaskImage = {
   file: string;
   /** When the photograph was posted (YYYY-MM-DD), null when unknown. */
   postedAt: string | null;
+  /** Original public profile URL for human review; never sent to the model. */
+  profileUrl: string | null;
   /** Server path (relative to BENCH_API) that returns the jpeg bytes. */
   url: string;
 };

@@ -18,12 +18,15 @@ export function useAvailableModels(providerId: string): {
    * Missing entries mean the endpoint exposes no capability data.
    */
   modelTypes: Record<string, string>;
+  /** Model ids whose endpoint can force the reasoning channel open natively. */
+  forceThinkingModels: Record<string, boolean>;
   /** True until the selected provider's model request has settled. */
   loading: boolean;
   refresh: () => void;
 } {
   const [models, setModels] = useState<string[]>([]);
   const [modelTypes, setModelTypes] = useState<Record<string, string>>({});
+  const [forceThinkingModels, setForceThinkingModels] = useState<Record<string, boolean>>({});
   const [loadedProviderId, setLoadedProviderId] = useState("");
   const [fetchTick, setFetchTick] = useState(0);
   const refresh = useCallback(() => setFetchTick((tick) => tick + 1), []);
@@ -37,6 +40,7 @@ export function useAvailableModels(providerId: string): {
     if (!trimmed) {
       setModels([]);
       setModelTypes({});
+      setForceThinkingModels({});
       setLoadedProviderId("");
       return;
     }
@@ -49,11 +53,12 @@ export function useAvailableModels(providerId: string): {
         if (!response.ok) {
           setModels([]);
           setModelTypes({});
+          setForceThinkingModels({});
           setLoadedProviderId(trimmed);
           return;
         }
         const payload = (await response.json()) as {
-          models?: Array<{ id?: unknown; modelType?: unknown }>;
+          models?: Array<{ id?: unknown; modelType?: unknown; forceThinking?: unknown }>;
         };
         const entries = Array.isArray(payload.models) ? payload.models : [];
         setModels(
@@ -69,12 +74,20 @@ export function useAvailableModels(providerId: string): {
               .map((model) => [model.id, model.modelType])
           )
         );
+        setForceThinkingModels(
+          Object.fromEntries(
+            entries
+              .filter((model): model is { id: string } => typeof model.id === "string")
+              .map((model) => [model.id, Boolean((model as { forceThinking?: unknown }).forceThinking)])
+          )
+        );
         setLoadedProviderId(trimmed);
       } catch {
         if (controller.signal.aborted) return;
         // The endpoint may be offline; free text remains available.
         setModels([]);
         setModelTypes({});
+        setForceThinkingModels({});
         setLoadedProviderId(trimmed);
       }
     }, 300);
@@ -86,6 +99,7 @@ export function useAvailableModels(providerId: string): {
   return {
     models: loading ? [] : models,
     modelTypes: loading ? {} : modelTypes,
+    forceThinkingModels: loading ? {} : forceThinkingModels,
     loading,
     refresh
   };

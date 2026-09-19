@@ -66,10 +66,10 @@ export function useBenchmarkController() {
   const systemPromptByBenchmark = useBenchmarkDefaults();
   const form = useBenchForm(systemPromptByBenchmark);
   const {
-    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, captureTelemetry, thinkingBudget, timeoutSeconds, parallelTasks,
+    benchmark, providerId, model, maxOutputTokens, thinkingEnabled, forceThinking, captureTelemetry, thinkingBudget, timeoutSeconds, parallelTasks,
     passCount, adaptiveRepetitionPenalty, repetitionPenalty, commentSignalThreshold, benchmarkMentionRegex, sampleLimit, startIndex, testNumbers,
     systemPrompt, promptTemplate, extraBody, setBenchmark, setProviderId, setModel,
-    setMaxOutputTokens, setThinkingEnabled, setCaptureTelemetry, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount, setAdaptiveRepetitionPenalty, setRepetitionPenalty,
+    setMaxOutputTokens, setThinkingEnabled, setForceThinking, setCaptureTelemetry, setThinkingBudget, setTimeoutSeconds, setParallelTasks, setPassCount, setAdaptiveRepetitionPenalty, setRepetitionPenalty,
     setCommentSignalThreshold, setBenchmarkMentionRegex, setSampleLimit, setStartIndex, setTestNumbers,
     setSystemPrompt, setPromptTemplate, setExtraBody, resetRunConfig, loadRunConfig
   } = form;
@@ -390,6 +390,7 @@ export function useBenchmarkController() {
       model,
       maxOutputTokens,
       thinkingEnabled,
+      forceThinking,
       captureTelemetry,
       thinkingBudget,
       timeoutSeconds,
@@ -565,6 +566,7 @@ export function useBenchmarkController() {
     model,
     maxOutputTokens,
     thinkingEnabled,
+    forceThinking,
     captureTelemetry,
     thinkingBudget,
     timeoutSeconds,
@@ -606,6 +608,7 @@ export function useBenchmarkController() {
     setModel,
     setMaxOutputTokens,
     setThinkingEnabled,
+    setForceThinking,
     setCaptureTelemetry,
     setThinkingBudget,
     setTimeoutSeconds,

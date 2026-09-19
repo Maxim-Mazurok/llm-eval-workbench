@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bbehDataRevision } from "./benchmarks/bbehDataCorrections.mjs";
+import { restoreResultImageReviewMetadata } from "./runtime.mjs";
 import { createRuntimeTestHarness } from "./runtimeTestHarness.mjs";
 
 const problems = [
@@ -185,6 +186,30 @@ function makeHeldThenGoodModelHandler(heldResponses, heldRequestCount) {
 }
 
 describe("runtime server", () => {
+  it("restores review metadata on historical result images", () => {
+    const results = [{
+      taskId: "person-props/0",
+      images: [{ file: "photo.jpg", postedAt: null, url: "/photo.jpg" }],
+    }];
+    const benchmarkProblems = [{
+      task_id: "person-props/0",
+      images: [{
+        file: "/dataset/images/photo.jpg",
+        profileUrl: "https://www.facebook.com/example.profile/",
+      }],
+    }];
+
+    expect(restoreResultImageReviewMetadata(results, benchmarkProblems)).toEqual([{
+      taskId: "person-props/0",
+      images: [{
+        file: "photo.jpg",
+        postedAt: null,
+        profileUrl: "https://www.facebook.com/example.profile/",
+        url: "/photo.jpg",
+      }],
+    }]);
+  });
+
   it("proxies the endpoint's model list through /api/models", async () => {
     const rootDir = await makeRootDir();
     const { apiUrl } = await startRuntime(rootDir, {
@@ -196,7 +221,7 @@ describe("runtime server", () => {
             JSON.stringify({
               data: [
                 { id: "text-model", max_model_len: 4096 },
-                { id: "vl-model" },
+                { id: "vl-model", force_thinking: true },
               ],
             }),
           );
@@ -210,8 +235,18 @@ describe("runtime server", () => {
     ).then((response) => response.json());
     expect(payload).toEqual({
       models: [
-        { id: "text-model", maxModelLen: 4096, modelType: null },
-        { id: "vl-model", maxModelLen: null, modelType: null },
+        {
+          id: "text-model",
+          maxModelLen: 4096,
+          modelType: null,
+          forceThinking: false,
+        },
+        {
+          id: "vl-model",
+          maxModelLen: null,
+          modelType: null,
+          forceThinking: true,
+        },
       ],
     });
 
@@ -1540,6 +1575,36 @@ describe("runtime server", () => {
     expect(reloaded.results[0].extractedCode).toBe(goodSolutions.add_one);
   });
 
+  it("reloads a persisted run through a directory symlink", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([goodModelHandler]);
+    const first = await startRuntime(rootDir);
+
+    const created = await createRun(first.apiUrl, model.baseUrl, {
+      testNumbers: "0",
+    });
+    await waitForStatus(first.apiUrl, created.id, ["completed"]);
+    const [runDirectoryName] = await fs.readdir(join(rootDir, "benchmark-runs"));
+    const linkedRunsDirectory = join(rootDir, "linked-runs");
+    const runDirectory = join(rootDir, "benchmark-runs", runDirectoryName);
+    const linkedRunDirectory = join(linkedRunsDirectory, runDirectoryName);
+    await fs.mkdir(linkedRunsDirectory);
+    await fs.rename(runDirectory, linkedRunDirectory);
+    await fs.symlink(linkedRunDirectory, runDirectory, "dir");
+
+    const second = await startRuntime(rootDir);
+    const reloaded = await fetch(`${second.apiUrl}/api/runs/${created.id}`).then(
+      (response) => response.json(),
+    );
+    expect(reloaded).toMatchObject({
+      id: created.id,
+      status: "completed",
+      completed: 1,
+      passed: 1,
+    });
+    expect(reloaded.results).toHaveLength(1);
+  });
+
   it("reloads a saved provider key from the credential store across restart and resume", async () => {
     const rootDir = await makeRootDir();
     const hangingResponses = [];
@@ -1647,23 +1712,44 @@ describe("runtime server", () => {
 
   it("sends thinking configuration and a combined token budget to the model", async () => {
     const rootDir = await makeRootDir();
-    const model = await startModelServer([goodModelHandler]);
+    const model = await startModelServer([
+      // Capability probe for forceThinking; this endpoint advertises none, so
+      // the run keeps the prompt-level fallback.
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+      },
+      goodModelHandler,
+    ]);
     const { apiUrl } = await startRuntime(rootDir);
 
     const withThinking = await createRun(apiUrl, model.baseUrl, {
       testNumbers: "0",
       maxOutputTokens: 700,
       thinkingEnabled: true,
+      forceThinking: true,
       thinkingBudget: 300,
     });
     await waitForStatus(apiUrl, withThinking.id, ["completed"]);
 
-    expect(model.requests[0].body).toMatchObject({
+    const completions = model.requests.filter((request) =>
+      request.url.endsWith("/chat/completions"),
+    );
+    expect(completions[0].body).toMatchObject({
       max_tokens: 1000,
       enable_thinking: true,
       thinking_budget: 300,
       chat_template_kwargs: { enable_thinking: true },
     });
+    expect(completions[0].body.messages[0].content).toContain(
+      "always produce non-empty reasoning",
+    );
+    expect(completions[0].body).not.toHaveProperty("force_thinking");
+
+    const runDetail = await fetch(`${apiUrl}/api/runs/${withThinking.id}`).then(
+      (response) => response.json(),
+    );
+    expect(runDetail.config.forceThinking).toBe(true);
 
     const withoutThinking = await createRun(apiUrl, model.baseUrl, {
       testNumbers: "0",
@@ -1674,12 +1760,47 @@ describe("runtime server", () => {
     });
     await waitForStatus(apiUrl, withoutThinking.id, ["completed"]);
 
-    expect(model.requests[1].body).toMatchObject({
+    const laterCompletions = model.requests.filter((request) =>
+      request.url.endsWith("/chat/completions"),
+    );
+    expect(laterCompletions[1].body).toMatchObject({
       max_tokens: 700,
       enable_thinking: false,
       chat_template_kwargs: { enable_thinking: false },
     });
-    expect(model.requests[1].body).not.toHaveProperty("thinking_budget");
+    expect(laterCompletions[1].body).not.toHaveProperty("thinking_budget");
+    expect(laterCompletions[1].body.messages[0].content).not.toContain(
+      "always produce non-empty reasoning",
+    );
+  });
+
+  it("prefers native force_thinking when the endpoint advertises it", async () => {
+    const rootDir = await makeRootDir();
+    const model = await startModelServer([
+      (request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({ data: [{ id: "test-model", force_thinking: true }] }),
+        );
+      },
+      goodModelHandler,
+    ]);
+    const { apiUrl } = await startRuntime(rootDir);
+
+    const created = await createRun(apiUrl, model.baseUrl, {
+      testNumbers: "0",
+      thinkingEnabled: true,
+      forceThinking: true,
+    });
+    await waitForStatus(apiUrl, created.id, ["completed"]);
+
+    const completion = model.requests
+      .filter((request) => request.url.endsWith("/chat/completions"))
+      .at(-1);
+    expect(completion.body.force_thinking).toBe(true);
+    expect(completion.body.messages[0].content).not.toContain(
+      "always produce non-empty reasoning",
+    );
   });
 
   it("uses Slotstream reasoning fields without OMLX extensions", async () => {

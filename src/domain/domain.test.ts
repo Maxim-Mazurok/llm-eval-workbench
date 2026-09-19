@@ -40,6 +40,7 @@ import {
   assertionStats,
   completedMetricLines,
   failureStats,
+  formatAssert,
   formatMs,
   liveEstimate,
   progressSegments,
@@ -71,6 +72,18 @@ const result = (overrides: Partial<BenchResult>): BenchResult => ({
   rawOutput: "",
   extractedCode: "def foo(x):\n    return x",
   ...overrides
+});
+
+describe("formatAssert", () => {
+  it("shows comparison details for passing assertions", () => {
+    expect(formatAssert({
+      source: "age range covers the true age",
+      passed: true,
+      expected: "29",
+      actual: "[24, 32]",
+      operator: "range"
+    })).toContain("expected: 29\nactual:   [24, 32]\noperator: range");
+  });
 });
 
 const run = (overrides: Partial<BenchRun>): BenchRun => ({
@@ -284,8 +297,8 @@ describe("run domain helpers", () => {
       activeTaskIds: ["HumanEval/2"],
       config: { passCount: 2, parallelTasks: 1 },
       results: [
-        result({ generationMs: 10_000, activeDurationMilliseconds: 12_000 }),
-        result({ taskId: "HumanEval/1", generationMs: 20_000, activeDurationMilliseconds: 22_000 })
+        result({ generationMs: 10_000, activeDurationMilliseconds: 12_000, thinkingOutput: "reasoning" }),
+        result({ taskId: "HumanEval/1", generationMs: 20_000, activeDurationMilliseconds: 22_000, thinkingOutput: "\n" })
       ]
     });
     const events: EventEnvelope[] = [{
@@ -296,7 +309,8 @@ describe("run domain helpers", () => {
 
     expect(completedMetricLines(running)).toEqual([
       ["Total:", "50% (2/4)"],
-      ["2nd pass:", "0% (0/2)"]
+      ["2nd pass:", "0% (0/2)"],
+      ["Thinking:", "50% (1/2)"]
     ]);
     expect(liveEstimate(running, events, nowMs)?.remaining).toBe("29s");
     expect(liveEstimate(running, events, nowMs)?.expectedTotal).toBe("1m 8s");

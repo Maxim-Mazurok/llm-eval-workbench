@@ -54,6 +54,8 @@ export function ordinal(value: number) {
 export function completedMetricLines(run?: BenchRun | null): Array<[string, string]> {
   const total = runTotal(run);
   const completed = Math.min(Math.max(run?.completed ?? 0, 0), total);
+  const completedResults = run?.results ?? [];
+  const resultsWithThinking = completedResults.filter((result) => result.thinkingOutput?.trim()).length;
   const passCount = runPassCount(run);
   const passTotal = Math.max(1, Math.ceil(total / passCount));
   const currentPass = completed >= total
@@ -63,7 +65,8 @@ export function completedMetricLines(run?: BenchRun | null): Array<[string, stri
 
   return [
     ["Total:", `${pct(total ? completed / total : 0)} (${completed}/${total})`],
-    [`${ordinal(currentPass)} pass:`, `${pct(currentPassCompleted / passTotal)} (${currentPassCompleted}/${passTotal})`]
+    [`${ordinal(currentPass)} pass:`, `${pct(currentPassCompleted / passTotal)} (${currentPassCompleted}/${passTotal})`],
+    ["Thinking:", `${pct(completedResults.length ? resultsWithThinking / completedResults.length : 0)} (${resultsWithThinking}/${completedResults.length})`]
   ];
 }
 
@@ -343,7 +346,7 @@ export function formatAssert(test: BenchResult["tests"][number]) {
   const confidenceSuffix =
     typeof test.confidence === "number" ? ` (confidence ${pct(test.confidence)})` : "";
   const lines = [`${test.passed ? "PASS" : "FAIL"} ${test.source}${scoreSuffix}${confidenceSuffix}`];
-  if (!test.passed && (test.expected !== undefined || test.actual !== undefined)) {
+  if (test.expected !== undefined || test.actual !== undefined) {
     lines.push(`expected: ${test.expected ?? "n/a"}`);
     lines.push(`actual:   ${test.actual ?? "n/a"}`);
     if (test.operator) lines.push(`operator: ${test.operator}`);

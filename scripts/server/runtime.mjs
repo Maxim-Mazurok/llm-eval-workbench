@@ -52,6 +52,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const defaultRootDir =
   process.env.LLM_EVAL_ROOT_DIR || join(__dirname, "../..");
 const LOOP_DETECTION_CHECK_INTERVAL_CHARACTERS = 512;
+const FORCE_THINKING_INSTRUCTION =
+  "Before giving the final answer, always produce non-empty reasoning in the model's separate thinking or reasoning channel.";
 
 // Benchmarks that ship binary assets (photographs, audio, ...) expose
 // `resolveAssetPath(file)`; the runtime serves whatever that returns and knows
@@ -68,6 +70,31 @@ const ASSET_CONTENT_TYPES = new Map([
 
 export function benchmarkAssetUrl(benchmarkId, file) {
   return `${BENCHMARK_ASSET_ROUTE_PREFIX}${encodeURIComponent(benchmarkId)}/${encodeURIComponent(file)}`;
+}
+
+export function restoreResultImageReviewMetadata(results, problems) {
+  const problemByTaskId = new Map(
+    problems.map((problem) => [problem.task_id, problem]),
+  );
+  return results.map((result) => {
+    if (!Array.isArray(result.images)) return result;
+    const problemImages = problemByTaskId.get(result.taskId)?.images;
+    if (!Array.isArray(problemImages)) return result;
+    const profileUrlByFile = new Map(
+      problemImages
+        .filter((image) => typeof image.profileUrl === "string")
+        .map((image) => [basename(String(image.file)), image.profileUrl]),
+    );
+    let changed = false;
+    const images = result.images.map((image) => {
+      if (image.profileUrl) return image;
+      const profileUrl = profileUrlByFile.get(image.file);
+      if (!profileUrl) return image;
+      changed = true;
+      return { ...image, profileUrl };
+    });
+    return changed ? { ...result, images } : result;
+  });
 }
 
 function byteLength(text) {
@@ -625,9 +652,9 @@ export function createRuntimeServer({
     return responseResult();
   }
 
-  // Photograph references for the UI: file names plus a server URL the
-  // frontend can load pixels from. Only names are persisted in events and
-  // results — the bytes stay on disk and go over the wire once per request.
+  // Photograph references for the UI: file names, review metadata, and a server URL
+  // the frontend can load pixels from. Image bytes stay on disk and go over the wire
+  // once per model request; review metadata never enters that request.
   function problemImageRefs(benchmark, problem) {
     const images = Array.isArray(problem.images) ? problem.images : [];
     if (!images.length) return undefined;
@@ -636,6 +663,7 @@ export function createRuntimeServer({
       return {
         file,
         postedAt: image.postedAt ?? null,
+        profileUrl: image.profileUrl ?? null,
         url: benchmarkAssetUrl(benchmark.id, file),
       };
     });
@@ -669,9 +697,15 @@ export function createRuntimeServer({
     run.abortControllers ??= new Set();
     run.abortControllers.add(controller);
     run.abortController = controller;
+    const systemPrompt =
+      run.forceThinking && !run.forceThinkingNative
+        ? [run.systemPrompt, FORCE_THINKING_INSTRUCTION]
+            .filter((part) => String(part || "").trim())
+            .join("\n\n")
+        : run.systemPrompt;
     const messages = buildPromptMessages(
       problem,
-      run.systemPrompt,
+      systemPrompt,
       run.promptTemplate,
     );
     const wireMessages = await attachProblemImages(messages, problem);
@@ -699,6 +733,7 @@ export function createRuntimeServer({
     if (run.thinkingEnabled)
       body.thinking_budget = thinkingBudget;
     else delete body.thinking_budget;
+    if (run.forceThinkingNative) body.force_thinking = true;
     if (
       !Number.isFinite(Number(body.repetition_penalty)) ||
       Number(body.repetition_penalty) <= 0
@@ -1507,6 +1542,36 @@ export function createRuntimeServer({
     };
   }
 
+  // oMLX advertises `force_thinking` per model in /v1/models. Endpoints that
+  // do not advertise it keep the prompt-level fallback.
+  async function fetchForceThinkingSupport(baseUrl, modelId, apiKey) {
+    try {
+      const response = await fetchImplementation(`${baseUrl}/models`, {
+        signal: AbortSignal.timeout(3000),
+        headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+      });
+      if (!response.ok) return false;
+      const payload = await response.json();
+      const model = (payload?.data || []).find(
+        (entry) => entry?.id === String(modelId || "").trim(),
+      );
+      return Boolean(model?.force_thinking);
+    } catch {
+      return false;
+    }
+  }
+
+  async function resolveForceThinkingNative(
+    baseUrl,
+    modelId,
+    apiKey,
+    thinkingEnabled,
+    forceThinking,
+  ) {
+    if (!forceThinking || !thinkingEnabled) return false;
+    return fetchForceThinkingSupport(baseUrl, modelId, apiKey);
+  }
+
   async function createRun(config) {
     const { baseUrl, apiKey, providerId, providerName } =
       await resolveProviderConfig(config);
@@ -1535,6 +1600,13 @@ export function createRuntimeServer({
     const usesSlotstreamApi = String(providerName || "")
       .toLowerCase()
       .includes("slotstream");
+    const forceThinkingNative = await resolveForceThinkingNative(
+      baseUrl,
+      config.model,
+      apiKey,
+      config.thinkingEnabled !== false,
+      Boolean(config.forceThinking),
+    );
     const selectedIndices = parseTestNumbers(
       config.testNumbers,
       allProblems.length,
@@ -1586,6 +1658,8 @@ export function createRuntimeServer({
       temperature: Number(config.temperature ?? 0),
       maxOutputTokens: normalizeTokenCount(config.maxOutputTokens, 2048),
       thinkingEnabled: config.thinkingEnabled !== false,
+      forceThinking: Boolean(config.forceThinking),
+      forceThinkingNative,
       thinkingBudget: normalizeTokenCount(config.thinkingBudget, 8192),
       timeoutSeconds: Number(config.timeoutSeconds ?? 15),
       parallelTasks,
@@ -1620,6 +1694,8 @@ export function createRuntimeServer({
         temperature: Number(config.temperature ?? 0),
         maxOutputTokens: normalizeTokenCount(config.maxOutputTokens, 2048),
         thinkingEnabled: config.thinkingEnabled !== false,
+        forceThinking: Boolean(config.forceThinking),
+        forceThinkingNative,
         thinkingBudget: normalizeTokenCount(config.thinkingBudget, 8192),
         timeoutSeconds: Number(config.timeoutSeconds ?? 15),
         parallelTasks,
@@ -1757,6 +1833,7 @@ export function createRuntimeServer({
       2048,
     );
     run.thinkingEnabled = config.thinkingEnabled ?? run.thinkingEnabled;
+    run.forceThinking = Boolean(config.forceThinking ?? run.forceThinking);
     run.thinkingBudget = normalizeTokenCount(
       config.thinkingBudget ?? run.thinkingBudget,
       8192,
@@ -1806,6 +1883,8 @@ export function createRuntimeServer({
       temperature: run.temperature,
       maxOutputTokens: run.maxOutputTokens,
       thinkingEnabled: run.thinkingEnabled,
+      forceThinking: run.forceThinking,
+      forceThinkingNative: run.forceThinkingNative,
       thinkingBudget: run.thinkingBudget,
       timeoutSeconds: run.timeoutSeconds,
       parallelTasks,
@@ -1850,6 +1929,13 @@ export function createRuntimeServer({
       run.apiKey,
       run.providerName,
     );
+    run.forceThinkingNative = await resolveForceThinkingNative(
+      run.baseUrl,
+      run.model,
+      run.apiKey,
+      run.thinkingEnabled,
+      run.forceThinking,
+    );
   }
 
   function resumeRun(run) {
@@ -1886,7 +1972,12 @@ export function createRuntimeServer({
     for (const entry of entries) {
       // Migration backups live beneath the runs directory but are not runs.
       // Ignore all hidden directories so they are not treated as persisted runs.
-      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      if (
+        (!entry.isDirectory() && !entry.isSymbolicLink()) ||
+        entry.name.startsWith(".")
+      ) {
+        continue;
+      }
       const dir = join(runsDir, entry.name);
       try {
         const raw = await fs.readFile(join(dir, "run.json"), "utf8");
@@ -1942,6 +2033,7 @@ export function createRuntimeServer({
         try {
           const benchmark = getBenchmark(run.benchmark);
           const allProblems = await loadBenchmarkProblems(benchmark);
+          run.results = restoreResultImageReviewMetadata(run.results, allProblems);
           const hasConfiguredTestNumbers = String(run.publicConfig?.testNumbers || "").trim().length > 0;
           const selectedTaskCount = new Set(run.selectedIndices || []).size;
           const savedDatasetSize = Number.isFinite(run.datasetSize)
@@ -2120,6 +2212,7 @@ export function createRuntimeServer({
                   id: model.id,
                   maxModelLen: model.max_model_len ?? null,
                   modelType: modelTypes?.get(model.id) ?? null,
+                  forceThinking: Boolean(model.force_thinking),
                 }))
             : [];
           return sendJson(res, 200, { models });

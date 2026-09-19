@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, ExternalLink } from "lucide-react";
 import { BENCH_API, runBenchmarkKind, runBenchmarkScoring, type BenchResult, type BenchRun, type BenchTaskImage, type TaskGroup, type TaskPromptInfo, type TokenEvent } from "../domain/benchmark";
 import {
   analyzeBenchmarkMention,
@@ -30,9 +30,9 @@ function primaryResultStatus(
 
 /**
  * The photographs that were attached to the model call, loaded from the bench
- * server (only file names are persisted in results and events). Rendered at
- * the top of the "Prompt sent to model" panel so what the model saw is
- * visible next to what it read.
+ * server. Rendered at the top of the "Prompt sent to model" panel so what
+ * the model saw is visible next to what it read. Review-only profile URLs
+ * stay outside the model prompt.
  */
 function PromptImages({ images }: { images?: BenchTaskImage[] }) {
   if (!images?.length) return null;
@@ -48,8 +48,16 @@ function PromptImages({ images }: { images?: BenchTaskImage[] }) {
             />
           </a>
           <figcaption>
-            Photograph {imageIndex + 1}
-            {image.postedAt ? ` · posted ${image.postedAt}` : " · posted date unknown"}
+            <span>
+              Photograph {imageIndex + 1}
+              {image.postedAt ? ` · posted ${image.postedAt}` : " · posted date unknown"}
+            </span>
+            {image.profileUrl && (
+              <a href={image.profileUrl} rel="noreferrer" target="_blank">
+                <ExternalLink aria-hidden="true" size={12} />
+                View profile
+              </a>
+            )}
           </figcaption>
         </figure>
       ))}

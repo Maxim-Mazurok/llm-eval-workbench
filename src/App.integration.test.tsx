@@ -177,6 +177,35 @@ describe("App notifications", () => {
     });
   });
 
+  it("sends force-thinking configuration and clears it when thinking is disabled", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, requestInit?: RequestInit) => {
+      const requestUrl = String(input);
+      if (requestUrl.endsWith("/api/runs") && requestInit?.method === "POST") {
+        return jsonResponse(baseRun({ status: "queued" }), 201);
+      }
+      if (requestUrl.endsWith("/api/runs")) return jsonResponse({ runs: [] });
+      return jsonResponse(baseRun({ events: [] } as Partial<RunFixture>));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const thinkingCheckbox = screen.getByRole("checkbox", { name: "Thinking" });
+    const forceThinkingCheckbox = screen.getByRole("checkbox", { name: "Force thinking" });
+    await userEvent.click(forceThinkingCheckbox);
+    await userEvent.type(screen.getByPlaceholderText("provider/model-name"), "demo-model");
+    await userEvent.click(screen.getByRole("button", { name: /start run/i }));
+
+    const startRequest = fetchMock.mock.calls.find(([, requestInit]) => requestInit?.method === "POST");
+    expect(JSON.parse(String(startRequest?.[1]?.body))).toMatchObject({
+      thinkingEnabled: true,
+      forceThinking: true
+    });
+
+    await userEvent.click(thinkingCheckbox);
+    expect(forceThinkingCheckbox).not.toBeChecked();
+    expect(forceThinkingCheckbox).toBeDisabled();
+  });
+
   it("notifies after an SSE error when refresh finds an observed run completed", async () => {
     const notificationCalls = installNotificationMock();
     let listCalls = 0;

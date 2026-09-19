@@ -385,6 +385,14 @@
   line-height: 1.45;
 }
 
+/* Hover-explained caveat that still allows the option (e.g. forced thinking). */
+.field-warning-icon {
+  display: inline-flex;
+  color: #b4541f;
+  flex: none;
+  cursor: help;
+}
+
 .provider-field-group {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -215,6 +215,7 @@ export function runtimeConfigFromPersistedRun(persisted) {
       2048
     ),
     thinkingEnabled: (persistedConfig.thinkingEnabled ?? persisted.thinkingEnabled) !== false,
+    forceThinking: Boolean(persistedConfig.forceThinking ?? persisted.forceThinking),
     thinkingBudget: normalizeTokenCount(persistedConfig.thinkingBudget ?? persisted.thinkingBudget, 8192),
     timeoutSeconds: Number(persistedConfig.timeoutSeconds ?? persisted.timeoutSeconds ?? 15),
     sampleLimit: Number(persistedConfig.sampleLimit ?? persisted.sampleLimit ?? 0),

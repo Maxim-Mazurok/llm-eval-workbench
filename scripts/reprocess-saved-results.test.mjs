@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  discoverSavedRuns,
   executeHumanEvalCandidate,
   legacyExtractCode,
   markdownReport,
@@ -17,6 +18,26 @@ afterEach(async () => {
 });
 
 describe("saved result reprocessing", () => {
+  it("discovers runs through directory symlinks", async () => {
+    const rootDirectory = await fs.mkdtemp(join(tmpdir(), "linked-run-test-"));
+    tempDirs.push(rootDirectory);
+    const runsDirectory = join(rootDirectory, "benchmark-runs");
+    const archiveDirectory = join(rootDirectory, "archive", "saved-run");
+    await fs.mkdir(runsDirectory);
+    await fs.mkdir(archiveDirectory, { recursive: true });
+    await fs.writeFile(
+      join(archiveDirectory, "run.json"),
+      JSON.stringify({ id: "linked-run", benchmark: "humaneval" }),
+    );
+    await fs.writeFile(join(archiveDirectory, "results.json"), "[]");
+    await fs.symlink(archiveDirectory, join(runsDirectory, "saved-run"), "dir");
+
+    const savedRuns = await discoverSavedRuns(runsDirectory);
+
+    expect(savedRuns).toHaveLength(1);
+    expect(savedRuns[0].run.id).toBe("linked-run");
+  });
+
   it("re-extracts only from final output and reruns changed candidates", async () => {
     const runsDir = await fs.mkdtemp(join(tmpdir(), "humaneval-reprocess-test-"));
     tempDirs.push(runsDir);
