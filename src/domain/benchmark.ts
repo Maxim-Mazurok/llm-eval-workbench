@@ -499,7 +499,7 @@ export type BenchRoute = ({
   onlyBestModelResult?: boolean;
   ignoreIncompletePasses?: boolean;
   ignoreOutdatedResults?: boolean;
-  comparisonView?: "chart" | "table";
+  comparisonView?: "chart" | "table" | "tasks";
 }) & BenchRouteSelection;
 
 function routeSelection(search: string): BenchRouteSelection {
@@ -518,7 +518,8 @@ export function parseBenchRoute(pathname: string, search = ""): BenchRoute {
     if (searchParameters.get("best") === "false") route.onlyBestModelResult = false;
     if (searchParameters.get("complete") === "false") route.ignoreIncompletePasses = false;
     if (searchParameters.get("outdated") === "false") route.ignoreOutdatedResults = false;
-    if (searchParameters.get("view") === "table") route.comparisonView = "table";
+    const comparisonView = searchParameters.get("view");
+    if (comparisonView === "table" || comparisonView === "tasks") route.comparisonView = comparisonView;
     return route;
   }
   const runMatch = pathname.match(/^\/run\/([^/]+)\/?$/);
@@ -548,7 +549,7 @@ export function routePath(route: BenchRoute) {
     if (route.onlyBestModelResult === false) searchParameters.set("best", "false");
     if (route.ignoreIncompletePasses === false) searchParameters.set("complete", "false");
     if (route.ignoreOutdatedResults === false) searchParameters.set("outdated", "false");
-    if (route.comparisonView === "table") searchParameters.set("view", "table");
+    if (route.comparisonView === "table" || route.comparisonView === "tasks") searchParameters.set("view", route.comparisonView);
   }
   const search = searchParameters.toString();
   return search ? `${pathname}?${search}` : pathname;

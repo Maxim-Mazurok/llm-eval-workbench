@@ -49,6 +49,7 @@ export function ComparisonScatterPlot({
   onlyBestModelResult: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const hideTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [width, setWidth] = useState(1_100);
   const [hoveredPoint, setHoveredPoint] = useState<PlotPoint | null>(null);
   const height = width < 620 ? 430 : 560;
@@ -64,6 +65,29 @@ export function ComparisonScatterPlot({
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
   }, []);
+
+  useEffect(() => () => {
+    if (hideTooltipTimerRef.current) clearTimeout(hideTooltipTimerRef.current);
+  }, []);
+
+  function cancelTooltipHide() {
+    if (!hideTooltipTimerRef.current) return;
+    clearTimeout(hideTooltipTimerRef.current);
+    hideTooltipTimerRef.current = null;
+  }
+
+  function showTooltip(point: PlotPoint) {
+    cancelTooltipHide();
+    setHoveredPoint(point);
+  }
+
+  function scheduleTooltipHide() {
+    cancelTooltipHide();
+    hideTooltipTimerRef.current = setTimeout(() => {
+      setHoveredPoint(null);
+      hideTooltipTimerRef.current = null;
+    }, 100);
+  }
 
   const chart = useMemo(() => {
     const margin = width < 620
@@ -106,8 +130,28 @@ export function ComparisonScatterPlot({
   }, [height, ignoreIncompletePasses, rows, width, xMetric.higherIsBetter, xMetricId, yMetric.higherIsBetter, yMetricId]);
 
   const tooltipWidth = Math.min(300, width - 28);
-  const tooltipX = hoveredPoint ? Math.min(Math.max(hoveredPoint.x + 14, 14), width - tooltipWidth - 14) : 0;
-  const tooltipY = hoveredPoint ? Math.min(Math.max(hoveredPoint.y - 74, 14), height - 116) : 0;
+  const tooltipGap = 14;
+  const tooltipHeight = 102;
+  const tooltipFitsRight = hoveredPoint
+    ? hoveredPoint.x + tooltipGap + tooltipWidth <= width - tooltipGap
+    : false;
+  const tooltipFitsLeft = hoveredPoint
+    ? hoveredPoint.x - tooltipGap - tooltipWidth >= tooltipGap
+    : false;
+  const tooltipX = hoveredPoint
+    ? tooltipFitsRight
+      ? hoveredPoint.x + tooltipGap
+      : tooltipFitsLeft
+        ? hoveredPoint.x - tooltipGap - tooltipWidth
+        : Math.min(Math.max(hoveredPoint.x - tooltipWidth / 2, tooltipGap), width - tooltipWidth - tooltipGap)
+    : 0;
+  const tooltipY = hoveredPoint
+    ? tooltipFitsRight || tooltipFitsLeft
+      ? Math.min(Math.max(hoveredPoint.y - 74, tooltipGap), height - tooltipHeight - tooltipGap)
+      : hoveredPoint.y - tooltipGap - tooltipHeight >= tooltipGap
+        ? hoveredPoint.y - tooltipGap - tooltipHeight
+        : Math.min(hoveredPoint.y + tooltipGap, height - tooltipHeight - tooltipGap)
+    : 0;
 
   return (
     <div className="comparison-chart" ref={containerRef}>
@@ -148,17 +192,23 @@ export function ComparisonScatterPlot({
             role="button"
             tabIndex={0}
             onBlur={() => setHoveredPoint(null)}
-            onFocus={() => setHoveredPoint(point)}
-            onMouseEnter={() => setHoveredPoint(point)}
-            onMouseLeave={() => setHoveredPoint(null)}
+            onFocus={() => showTooltip(point)}
+            onMouseEnter={() => showTooltip(point)}
+            onMouseLeave={scheduleTooltipHide}
           >
             <circle cx={point.x} cy={point.y} fill={providerColor(point.provider)} r="7" />
             <circle className="comparison-chart-hit" cx={point.x} cy={point.y} r="16" />
           </g>
         ))}
         {hoveredPoint ? (
-          <g className="comparison-chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`}>
-            <rect height="102" width={tooltipWidth} />
+          <g
+            className="comparison-chart-tooltip"
+            role="tooltip"
+            transform={`translate(${tooltipX} ${tooltipY})`}
+            onMouseEnter={cancelTooltipHide}
+            onMouseLeave={scheduleTooltipHide}
+          >
+            <rect height={tooltipHeight} width={tooltipWidth} />
             <text className="comparison-chart-tooltip-title" x="12" y="23">{trimLabel(hoveredPoint.label)}</text>
             <text x="12" y="44">{trimLabel(hoveredPoint.provider)}</text>
             <text x="12" y="68">{xMetric.shortLabel}: {xMetric.format(hoveredPoint.xValue)}</text>

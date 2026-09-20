@@ -1,10 +1,11 @@
-import { ArrowLeft, BarChart3, Repeat2, Table2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, BarChart3, Columns3, Repeat2, Table2, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { benchmarkOption, runBenchmarkId, type BenchRoute, type BenchRun } from "../domain/benchmark";
 import { COMPARISON_METRICS, type ComparisonMetricId } from "../domain/comparisonChart";
 import { pct, runMeanScore, runTotal } from "../domain/runs";
 import { ComparisonScatterPlot } from "./ComparisonScatterPlot";
 import { MultiSelectFilter } from "./MultiSelectFilter";
+import { TaskComparison } from "./TaskComparison";
 
 export type ComparisonCell = {
   run: BenchRun;
@@ -115,6 +116,7 @@ export function BenchmarkComparison({
   const [yMetricId, setYMetricId] = useState<ComparisonMetricId>("score");
   const [sortKey, setSortKey] = useState("average");
   const [sortDescending, setSortDescending] = useState(true);
+  const [tasksFullScreen, setTasksFullScreen] = useState(false);
   const benchmarkIds = useMemo(() => Array.from(new Set(runs.map(runBenchmarkId))).sort((left, right) => (
     benchmarkOption(left).label.localeCompare(benchmarkOption(right).label)
   )), [runs]);
@@ -153,7 +155,7 @@ export function BenchmarkComparison({
   }
 
   return (
-    <section className="comparison-page">
+    <section className={`comparison-page${view === "tasks" && tasksFullScreen ? " task-fullscreen" : ""}`}>
       <header className="comparison-header">
         <button aria-label="Back to benchmarks" className="comparison-back" type="button" onClick={onBack}>
           <ArrowLeft size={18} />
@@ -213,6 +215,9 @@ export function BenchmarkComparison({
           <button className={view === "table" ? "active" : ""} type="button" onClick={() => onRouteChange({ ...route, comparisonView: "table" })}>
             <Table2 size={15} />Table
           </button>
+          <button className={view === "tasks" ? "active" : ""} type="button" onClick={() => onRouteChange({ ...route, comparisonView: "tasks" })}>
+            <Columns3 size={15} />Tasks
+          </button>
         </div>
       </div>
       {view === "chart" ? (
@@ -239,7 +244,7 @@ export function BenchmarkComparison({
             yMetricId={yMetricId}
           />
         </section>
-      ) : <div className="comparison-table-wrap">
+      ) : view === "tasks" ? <TaskComparison fullScreen={tasksFullScreen} rows={rows} setFullScreen={setTasksFullScreen} /> : <div className="comparison-table-wrap">
         <table className="comparison-table">
           <thead>
             <tr>

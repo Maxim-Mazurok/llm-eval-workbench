@@ -134,7 +134,7 @@ describe("benchmark routes", () => {
       onlyBestModelResult: false,
       ignoreIncompletePasses: false,
       ignoreOutdatedResults: false,
-      comparisonView: "table" as const
+      comparisonView: "tasks" as const
     };
     const comparisonPath = routePath(comparisonRoute);
     const comparisonUrl = new URL(comparisonPath, "http://localhost");
