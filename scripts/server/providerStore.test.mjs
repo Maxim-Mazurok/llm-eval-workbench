@@ -47,6 +47,30 @@ describe("provider store", () => {
     expect(credentialStore.load).not.toHaveBeenCalled();
   });
 
+  it("migrates a legacy local provider without probing the credential store", async () => {
+    const configDir = await fs.mkdtemp(join(tmpdir(), "provider-store-"));
+    cleanupPaths.push(configDir);
+    await fs.writeFile(join(configDir, "providers.json"), JSON.stringify({
+      providers: [{
+        id: DEFAULT_PROVIDER.id,
+        name: DEFAULT_PROVIDER.name,
+        baseUrl: DEFAULT_PROVIDER.baseUrl
+      }]
+    }));
+    const credentialStore = {
+      load: vi.fn(async () => { throw new Error("secret-tool is unavailable"); })
+    };
+    const store = createProviderStore({ configDir, credentialStore });
+
+    await expect(store.resolve(DEFAULT_PROVIDER.id)).resolves.toMatchObject({
+      hasApiKey: false,
+      apiKey: ""
+    });
+    expect(credentialStore.load).not.toHaveBeenCalled();
+    await expect(fs.readFile(join(configDir, "providers.json"), "utf8"))
+      .resolves.toContain('"hasApiKey": false');
+  });
+
   it("persists metadata but keeps the api key only in the credential store", async () => {
     const { configDir, credentialStore, secrets, store } = await fixture(false);
 

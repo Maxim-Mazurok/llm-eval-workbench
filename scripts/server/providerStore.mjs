@@ -49,7 +49,16 @@ export function createProviderStore({
   async function readProviders() {
     try {
       const parsed = JSON.parse(await fs.readFile(providersFile, "utf8"));
-      return Array.isArray(parsed?.providers) ? parsed.providers : [];
+      const providers = Array.isArray(parsed?.providers) ? parsed.providers : [];
+      const migratedProviders = providers.map((provider) => (
+        provider.id === DEFAULT_PROVIDER.id && typeof provider.hasApiKey !== "boolean"
+          ? { ...provider, hasApiKey: false }
+          : provider
+      ));
+      if (migratedProviders.some((provider, index) => provider !== providers[index])) {
+        await writeProviders(migratedProviders);
+      }
+      return migratedProviders;
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
       if (!seedDefault) return [];
