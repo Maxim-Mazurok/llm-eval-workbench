@@ -296,12 +296,14 @@ export function SidebarConfig(props: SidebarConfigProps) {
           type="checkbox"
           onChange={(event) => props.setForceThinking(event.target.checked)}
         />
-        <span>Force thinking</span>
-        {props.forceThinkingModels[props.model.trim()] ? null : (
-          <span aria-hidden="true" className="field-warning-icon" title={forceThinkingFallbackHint}>
-            <TriangleAlert size={13} />
-          </span>
-        )}
+        <span>
+          Force thinking
+          {props.forceThinkingModels[props.model.trim()] ? null : (
+            <span aria-hidden="true" className="field-warning-icon" title={forceThinkingFallbackHint}>
+              <TriangleAlert size={13} />
+            </span>
+          )}
+        </span>
       </label>
       <label className="field checkbox-field">
         <input
