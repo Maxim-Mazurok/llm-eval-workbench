@@ -46,6 +46,7 @@ describe("ProviderManager", () => {
     await userEvent.type(screen.getByLabelText("Display name"), "Azure");
     await userEvent.type(screen.getByLabelText("OpenAI-compatible base URL"), "https://azure.example/v1");
     await userEvent.type(screen.getByLabelText("API key"), "azure-secret");
+    expect(screen.getByRole("note")).toHaveTextContent("install Secret Service and secret-tool");
     await userEvent.click(screen.getByRole("button", { name: "Add provider" }));
     expect(onSave).toHaveBeenLastCalledWith({
       name: "Azure",
@@ -61,6 +62,18 @@ describe("ProviderManager", () => {
       baseUrl: "https://api.openai.com/v1",
       apiKey: ""
     }, "openai-main");
+  });
+
+  it("shows any provider save failure in the dialog", async () => {
+    const onSave = vi.fn(async () => { throw { reason: "unexpected" }; });
+    render(
+      <ProviderManager open providers={providers} selectedProviderId="openai-main"
+        onClose={vi.fn()} onSelect={vi.fn()} onSave={onSave} onDelete={vi.fn()} />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Provider request failed.")).toBeVisible();
   });
 });
 

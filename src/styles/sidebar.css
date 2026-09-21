@@ -657,6 +657,12 @@
   line-height: 1.45;
 }
 
+.provider-key-warning {
+  color: #71420d;
+  background: #fff7e6;
+  border-color: #e6c27a;
+}
+
 .provider-editor-actions {
   display: flex;
   gap: 10px;

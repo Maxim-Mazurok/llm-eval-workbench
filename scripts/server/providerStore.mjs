@@ -7,7 +7,8 @@ import { normalizeBaseUrl } from "./domain.mjs";
 export const DEFAULT_PROVIDER = Object.freeze({
   id: "local-default",
   name: "Local model server",
-  baseUrl: "http://localhost:8000/v1"
+  baseUrl: "http://localhost:8000/v1",
+  hasApiKey: false
 });
 
 function cleanProvider(input, id = randomUUID()) {
@@ -17,6 +18,7 @@ function cleanProvider(input, id = randomUUID()) {
     id,
     name,
     baseUrl: normalizeBaseUrl(input?.baseUrl),
+    ...(typeof input?.hasApiKey === "boolean" ? { hasApiKey: input.hasApiKey } : {}),
     createdAt: input?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -63,11 +65,14 @@ export function createProviderStore({
   }
 
   async function publicProvider(provider) {
-    let hasApiKey = false;
-    try {
-      hasApiKey = Boolean(await (await credentialBackend()).load(provider.id));
-    } catch {
-      // Listing metadata must still work if the OS keyring is unavailable.
+    let hasApiKey = provider.hasApiKey;
+    if (typeof hasApiKey !== "boolean") {
+      try {
+        hasApiKey = Boolean(await (await credentialBackend()).load(provider.id));
+      } catch {
+        // Listing metadata must still work if the OS keyring is unavailable.
+        hasApiKey = false;
+      }
     }
     return { ...provider, hasApiKey };
   }
@@ -84,6 +89,7 @@ export function createProviderStore({
   async function resolve(id) {
     const provider = (await state()).find((candidate) => candidate.id === id);
     if (!provider) throw new Error("Saved provider not found. Choose another provider or create it again.");
+    if (provider.hasApiKey === false) return { ...provider, apiKey: "" };
     let apiKey = "";
     try {
       apiKey = await (await credentialBackend()).load(provider.id) || "";
@@ -111,6 +117,9 @@ export function createProviderStore({
       const backend = await credentialBackend();
       if (apiKey) await backend.save(provider.id, apiKey);
       else await backend.clear(provider.id);
+      provider.hasApiKey = Boolean(apiKey);
+    } else if (!existing) {
+      provider.hasApiKey = false;
     }
 
     const nextProviders = [...providers];

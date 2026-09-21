@@ -1,6 +1,12 @@
-import { KeyRound, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { KeyRound, Plus, ShieldAlert, ShieldCheck, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ProviderConfig, ProviderInput } from "../domain/providers";
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return "Provider request failed.";
+}
 
 export function ProviderManager({
   open,
@@ -58,7 +64,7 @@ export function ProviderManager({
       onSelect(provider.id);
       edit(provider);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
+      setError(errorMessage(saveError));
     } finally {
       setSaving(false);
     }
@@ -75,7 +81,7 @@ export function ProviderManager({
       if (selectedProviderId === draftProvider.id) onSelect(remaining[0]?.id ?? "");
       edit(remaining[0] ?? null);
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+      setError(errorMessage(deleteError));
     } finally {
       setSaving(false);
     }
@@ -158,6 +164,13 @@ export function ProviderManager({
                 }} />
                 <span>Remove saved API key</span>
               </label>
+            ) : null}
+
+            {apiKey.trim() ? (
+              <div className="provider-security-note provider-key-warning" role="note">
+                <ShieldAlert size={18} />
+                <p>Saving a key requires the credential-vault tooling on the benchmark server. On Linux, install Secret Service and <code>secret-tool</code>, then unlock a keyring.</p>
+              </div>
             ) : null}
 
             <div className="provider-security-note">

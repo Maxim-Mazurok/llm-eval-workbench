@@ -30,7 +30,12 @@ async function fixture(seedDefault = true) {
 
 describe("provider store", () => {
   it("seeds a usable local provider without a key", async () => {
-    const { store } = await fixture();
+    const configDir = await fs.mkdtemp(join(tmpdir(), "provider-store-"));
+    cleanupPaths.push(configDir);
+    const credentialStore = {
+      load: vi.fn(async () => { throw new Error("secret-tool is unavailable"); })
+    };
+    const store = createProviderStore({ configDir, credentialStore });
 
     await expect(store.list()).resolves.toMatchObject([{
       id: DEFAULT_PROVIDER.id,
@@ -38,6 +43,8 @@ describe("provider store", () => {
       baseUrl: DEFAULT_PROVIDER.baseUrl,
       hasApiKey: false
     }]);
+    await expect(store.resolve(DEFAULT_PROVIDER.id)).resolves.toMatchObject({ apiKey: "" });
+    expect(credentialStore.load).not.toHaveBeenCalled();
   });
 
   it("persists metadata but keeps the api key only in the credential store", async () => {
@@ -56,6 +63,7 @@ describe("provider store", () => {
 
     const metadata = await fs.readFile(join(configDir, "providers.json"), "utf8");
     expect(metadata).toContain("Azure production");
+    expect(metadata).toContain('"hasApiKey": true');
     expect(metadata).not.toContain("sk-top-secret");
     // Windows/NTFS doesn't honor POSIX permission bits, so chmod is a no-op there.
     if (process.platform !== "win32") {
